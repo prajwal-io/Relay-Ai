@@ -1,0 +1,20 @@
+# Relay AI local API
+
+The local Node service provides a SQLite-backed project memory API and explicit handoff state transitions. It binds to loopback by default and stores the database at `apps/api/data/relay.sqlite`.
+
+## Run
+
+Use Node 22.9 or newer (the service uses built-in `node:sqlite` and optional `.env` loading):
+
+```sh
+npm install
+npm run dev --workspace apps/api
+```
+
+Copy `apps/api/.env.example` to `apps/api/.env` as needed. `GROQ_API_KEY` is optional and is read only on the server. `POST /api/v1/projects/:projectId/extract` returns suggested items for review; it does not save them automatically. Submitted context is redacted before an explicit Groq request. If Groq is unavailable, local extraction keeps working. `GET /api/v1/health` reports the selected provider without exposing credentials.
+
+## Handoff lifecycle
+
+Create a draft with `POST /api/v1/projects/:projectId/handoffs`, approve it with `POST /api/v1/handoffs/:id/approve`, then retrieve/consume it with `GET /api/v1/handoffs/:id/context` or `POST /api/v1/handoffs/:id/load`. The load route only accepts approved drafts and records the load timestamp. Project handoff history is available at `GET /api/v1/projects/:projectId/handoffs`.
+
+Verification responses report repository observations separately. A successful Git status check verifies only the observed working-tree state. It does not establish that a task or decision is correct or complete.
