@@ -11,7 +11,17 @@ const API = "/api/v1";
 const exec = promisify(execFile);
 const PORT = Number(process.env.PORT ?? 4317);
 const HOST = process.env.HOST ?? "127.0.0.1";
-const allowedOrigins = new Set(["http://localhost:5173", "http://127.0.0.1:5173", process.env.WEB_ORIGIN].filter(Boolean) as string[]);
+const allowedOrigins = new Set(
+  ["http://localhost:5173", "http://127.0.0.1:5173", process.env.WEB_ORIGIN, ...(process.env.WEB_ORIGINS ?? "").split(",")]
+    .flatMap((value) => {
+      const candidate = value?.trim();
+      if (!candidate) return [];
+      try {
+        const parsed = new URL(candidate);
+        return parsed.protocol === "http:" || parsed.protocol === "https:" ? [parsed.origin] : [];
+      } catch { return []; }
+    }),
+);
 const agentKinds = new Set<AgentKind>(["opencode", "codex", "other"]);
 const memoryKinds = new Set<MemoryKind>(["task", "decision", "file", "issue", "note"]);
 
@@ -83,7 +93,7 @@ function updateHandoff(h: Handoff) {
 
 async function route(req: IncomingMessage, res: ServerResponse) {
   const origin = req.headers.origin;
-  if (origin && !allowedOrigins.has(origin)) return fail(res, 403, "ORIGIN_NOT_ALLOWED", "This origin cannot access the local Relay service", origin);
+  if (origin && !allowedOrigins.has(origin)) return fail(res, 403, "ORIGIN_NOT_ALLOWED", "This origin is not allowed to access the Relay service", origin);
   if (req.method === "OPTIONS") {
     res.writeHead(204, { "access-control-allow-origin": origin && allowedOrigins.has(origin) ? origin : "null", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type", "access-control-max-age": "600", vary: "Origin" });
     return res.end();

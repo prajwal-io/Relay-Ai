@@ -34,9 +34,9 @@ npm test
 
 The API and MCP tests use temporary SQLite databases and local loopback connections. The API tests cover project/memory persistence, deduplication, draft/approve/load state, project history, missing repository paths, and the no-Groq fallback. Provider tests mock Groq responses, including structured extraction, redaction, retries, rate limits, and timeout fallback. The MCP test checks stdio protocol initialization.
 
-## Deployment boundary
+## Deployment
 
-The web client can be built and hosted separately with `npm run build --workspace apps/web`. The SQLite service and MCP process are intended to stay on the developer's machine. A hosted frontend talking to a local API must be configured with the API address and the API's `WEB_ORIGIN`; browser security may block loopback access from some hosted origins. Never expose the local API on a public interface without adding authentication and an explicit network security design.
+The frontend can be deployed to Vercel using the repository's `vercel.json`; see [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md) for the setup. The API, SQLite memory, repository checks, and MCP server stay on the developer's computer, so the hosted page only has dashboard access when opened on that same computer while the local service is running. The Vercel origin must be explicitly added to `WEB_ORIGINS`. Do not expose the local API on a public interface. This setup is for an individual local-first install; a multi-user hosted launch needs authenticated API access and durable cloud storage.
 
 ## Current trust model
 

@@ -7,6 +7,8 @@
 - `apps/mcp`: stdio MCP server using the official TypeScript SDK. MCP tools call the local service contracts.
 - `packages/shared`: shared API and domain types. This directory is the integration boundary.
 
+The Vercel deployment is the static `apps/web` client. It calls the user's loopback API; local SQLite, filesystem/Git evidence, MCP, and the optional Groq credential are not deployed. Exact frontend origins must be listed in `WEB_ORIGIN` / `WEB_ORIGINS`. See `VERCEL_DEPLOYMENT.md`. This is not a shared cloud backend.
+
 The local API owns persistence and repository verification. Browser UI and MCP server are clients. Groq is an optional server-side extraction adapter; persistence and basic handoff generation must work with it disabled or unavailable. Only explicitly submitted context is sent to the provider after basic secret and email redaction; the API key remains local. A Git command is evidence only for the exact repository observation it returns; it does not verify arbitrary claims in memory.
 
 ## Shared data contract
