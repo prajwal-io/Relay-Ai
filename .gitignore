@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.tmp-*/
+*.log
+apps/web/tsconfig.tsbuildinfo
+outputs/
+work/
+.codex/
+.taste-skill/
