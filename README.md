@@ -201,5 +201,3 @@ packages/shared/Shared TypeScript contracts
 - OpenCode's runtime MCP API is experimental.
 - Retrieval receipts prove package retrieval, not model comprehension or task completion.
 - The landing walkthrough is a clearly labeled simulation; actual workspace status comes from the local API.
-
-Relay is an open development project. Check the repository for the current license and release status before redistributing it.
