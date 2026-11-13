@@ -7,7 +7,6 @@ contextBridge.exposeInMainWorld('relayDesktop', {
   readChat: id => ipcRenderer.invoke('relay:read-chat', id),
   prepareChat: text => ipcRenderer.invoke('relay:prepare-chat', text),
   openOpenCode: id => ipcRenderer.invoke('relay:open-opencode', id),
-  showHandoffFile: () => ipcRenderer.invoke('relay:show-handoff-file'),
   moveBy: (dx, dy) => ipcRenderer.invoke('relay:move-by', dx, dy),
   openDashboard: () => ipcRenderer.invoke('relay:open-dashboard'),
   hide: () => ipcRenderer.invoke('relay:hide'),

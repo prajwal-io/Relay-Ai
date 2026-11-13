@@ -93,7 +93,6 @@ document.querySelector('#start-switch').addEventListener('click', async () => {
 });
 document.querySelector('#back-monitor').addEventListener('click', closeWorkflow);
 document.querySelector('#done-switch').addEventListener('click', closeWorkflow);
-document.querySelector('#show-handoff-file').addEventListener('click', () => window.relayDesktop.showHandoffFile());
 document.querySelector('#refresh-chats').addEventListener('click', loadChats);
 document.querySelector('#change-chat').addEventListener('click', loadChats);
 document.querySelector('#edit-context').addEventListener('click', () => showStage('review-stage'));
@@ -192,10 +191,10 @@ function setHandoff(handoff, isEvent) {
   document.querySelector('#handoff-title').textContent = handoff.title || 'Untitled handoff';
   const count = Number(handoff.itemCount) || 0;
   document.querySelector('#item-count').textContent = `${count} ${count === 1 ? 'ITEM' : 'ITEMS'}`;
-  const statusLabel = status === 'loaded' ? 'Loaded in destination' : status === 'approved' ? 'Approved · waiting for destination' : 'Draft · review required';
+  const statusLabel = status === 'loaded' ? 'Retrieved by destination' : status === 'approved' ? 'Approved · waiting for destination' : 'Draft · review required';
   const verificationLabel = handoff.verification ? `${handoff.verification} verification` : 'verification not recorded';
   document.querySelector('#handoff-meta').textContent = `${statusLabel} · ${verificationLabel}`;
-  document.querySelector('#panel-title').textContent = isEvent ? 'Context made the switch.' : status === 'loaded' ? 'Your last handoff landed.' : status === 'approved' ? 'Approved and ready to move.' : 'A handoff is taking shape.';
+  document.querySelector('#panel-title').textContent = isEvent ? 'Handoff retrieved.' : status === 'loaded' ? 'Your last handoff was retrieved.' : status === 'approved' ? 'Approved and ready to move.' : 'A handoff is taking shape.';
   document.querySelector('#panel-subtitle').textContent = `${prettyAgent(handoff.source)} → Relay → ${prettyAgent(handoff.destination)}`;
   document.querySelector('#source-state').textContent = `${prettyAgent(handoff.source).toUpperCase()} · SOURCE`;
   document.querySelector('#destination-state').textContent = status === 'loaded' ? 'CONTEXT RECEIVED' : 'DESTINATION';
@@ -218,7 +217,7 @@ window.relayDesktop.onState(state => {
   document.querySelector('#presence-label').textContent = online ? 'RELAY IS LISTENING LOCALLY' : 'LOCAL SERVICE DISCONNECTED';
   const handoff = state.event || state.recent;
   const status = String(handoff?.status || '').toLowerCase();
-  const summary = status === 'loaded' ? 'Handoff delivered' : status === 'approved' ? 'Handoff approved' : status === 'draft' ? 'Draft ready for review' : `${state.projectCount} local project${state.projectCount === 1 ? '' : 's'} · listening`;
+  const summary = status === 'loaded' ? 'Handoff retrieved' : status === 'approved' ? 'Handoff approved' : status === 'draft' ? 'Draft ready for review' : `${state.projectCount} local project${state.projectCount === 1 ? '' : 's'} · listening`;
   document.querySelector('#capsule-status').textContent = online ? summary : state.notice;
   document.querySelector('#local-status').innerHTML = online ? '<i class="status-dot online"></i> Relay service connected · loopback' : '<i class="status-dot"></i> Relay service unavailable';
   setHandoff(handoff, Boolean(state.event));

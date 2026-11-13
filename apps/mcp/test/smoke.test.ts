@@ -5,6 +5,7 @@ import { dirname, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { createServer } from "node:http";
 
 test("MCP process answers initialize on stdout without requiring the Relay API", async () => {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -59,5 +60,50 @@ test("MCP process answers initialize on stdout without requiring the Relay API",
     child.stdin.end();
     if (child.exitCode === null) child.kill();
     await Promise.race([once(child, "close"), delay(1_000)]);
+  }
+});
+
+test("desktop-scoped MCP exposes only its approved OpenCode package", async () => {
+  let observedPath = "";
+  let observedBody = "";
+  const api = createServer((request, response) => {
+    observedPath = request.url ?? "";
+    request.on("data", chunk => { observedBody += String(chunk); });
+    request.on("end", () => { response.setHeader("content-type", "application/json"); response.end(JSON.stringify({ handoff: { id: "fixture-id", status: "loaded" }, items: [] })); });
+  });
+  await new Promise<void>(resolve => api.listen(0, "127.0.0.1", resolve));
+  const address = api.address();
+  assert.ok(address && typeof address !== "string");
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  const child = spawn(process.execPath, ["--import", "tsx", resolve(repoRoot, "apps/mcp/src/index.ts")], {
+    cwd: repoRoot, stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, RELAY_API_URL: `http://127.0.0.1:${address.port}/api/v1`, RELAY_SCOPED_HANDOFF_ID: "fixture-id" },
+  });
+  let buffer = "";
+  const responses = new Map<number, any>();
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+    buffer += chunk;
+    const lines = buffer.split("\n"); buffer = lines.pop() ?? "";
+    for (const line of lines) if (line.trim()) { const message = JSON.parse(line); if (message.id) responses.set(message.id, message); }
+  });
+  async function call(id: number, method: string, params: unknown) {
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    for (let n = 0; n < 100 && !responses.has(id); n++) await delay(50);
+    assert.ok(responses.has(id), `No response to ${method}`);
+    return responses.get(id);
+  }
+  try {
+    await call(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "scoped-test", version: "1" } });
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+    const tools = (await call(2, "tools/list", {})).result.tools;
+    assert.deepEqual(tools.map((tool: { name: string }) => tool.name), ["relay_load_approved_handoff"]);
+    const response = await call(3, "tools/call", { name: "relay_load_approved_handoff", arguments: {} });
+    assert.equal(response.result.isError, undefined);
+    assert.equal(observedPath, "/api/v1/handoffs/fixture-id/load");
+    assert.deepEqual(JSON.parse(observedBody), { destination: "opencode" });
+  } finally {
+    child.stdin.end(); if (child.exitCode === null) child.kill();
+    await Promise.race([once(child, "close"), delay(1000)]);
+    await new Promise<void>(resolve => api.close(() => resolve()));
   }
 });
