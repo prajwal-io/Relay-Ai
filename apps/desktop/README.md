@@ -2,6 +2,8 @@
 
 The Electron companion runs as a separate Windows or macOS desktop process with a tray icon and a compact always-on-top widget. It polls Relay's loopback API for project and handoff state. When explicitly requested, it lists local Codex chats through Codex app-server and reads the selected chat for review. Linux terminal launch remains experimental.
 
+When **Open dashboard** is selected, the companion checks the standard local Vite ports for a page titled Relay AI so a different app occupying port 5173 is not opened by mistake. Set `RELAY_DASHBOARD_URL` to an HTTPS deployment or an explicit loopback URL to override discovery.
+
 ## Run
 
 From the repository root:

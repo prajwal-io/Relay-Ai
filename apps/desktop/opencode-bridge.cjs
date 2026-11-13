@@ -36,7 +36,7 @@ async function startBridge({ executable, node, root, projectPath, handoffId, api
     child.kill();
   });
   const request = (route, options = {}) => fetchImpl(`${base}${route}`, {
-    ...options, headers: { authorization, ...(options.headers || {}) }, signal: AbortSignal.timeout(2500),
+    ...options, headers: { authorization, ...(options.headers || {}) }, signal: AbortSignal.timeout(10_000),
   });
   try {
     let ready = false;
