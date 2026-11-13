@@ -135,7 +135,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     return fail(res, 429, "RATE_LIMITED", "Too many requests to the local Relay service", origin);
   }
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
-    if (req.method === "GET" && url.pathname === `${API}/health`) return json(res, 200, { ok: true, version: "0.1.0", intelligenceProvider: configuredExtractionProvider() }, origin);
+    if (req.method === "GET" && url.pathname === `${API}/health`) return json(res, 200, { ok: true, service: "relay-ai", version: "0.1.0", intelligenceProvider: configuredExtractionProvider() }, origin);
   if (!url.pathname.startsWith(API)) return fail(res, 404, "NOT_FOUND", "Route not found", origin);
   const path = url.pathname.slice(API.length).split("/").filter(Boolean).map(decodeURIComponent);
   const method = req.method ?? "GET";

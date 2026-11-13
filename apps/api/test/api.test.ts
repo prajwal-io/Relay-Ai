@@ -68,7 +68,9 @@ test("local API rejects hostile Host and cross-site browser requests", async () 
   const wrongContentType = await fetch(`${base}/projects`, { method: "POST", headers: { "content-type": "text/plain" }, body: "{}" });
   assert.equal(wrongContentType.status, 415);
   assert.equal((await wrongContentType.json() as any).error.code, "JSON_REQUIRED");
-  assert.equal((await fetch(`${base}/health`)).status, 200, "local desktop and MCP requests without browser metadata remain usable");
+  const health = await fetch(`${base}/health`);
+  assert.equal(health.status, 200, "local desktop and MCP requests without browser metadata remain usable");
+  assert.equal((await health.json() as any).service, "relay-ai", "desktop startup can distinguish Relay from another local service on the port");
 });
 
 test("SQLite project and memory persistence plus approved destination handoff flow", async () => {

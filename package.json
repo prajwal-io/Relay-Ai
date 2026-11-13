@@ -11,7 +11,7 @@
     "mcp": "npm run mcp --workspace apps/mcp",
     "desktop": "npm run desktop --workspace apps/desktop",
     "build": "npm run build --workspace apps/api && npm run build --workspace apps/web && npm run build --workspace apps/mcp",
-    "test": "npm run test --workspace apps/api && npm run test --workspace apps/mcp && npm run test --workspace apps/desktop"
+    "test": "npm run test --workspace apps/api && npm run test --workspace apps/mcp && npm run test --workspace apps/desktop && npm run test --workspace apps/web"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

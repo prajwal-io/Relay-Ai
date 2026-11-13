@@ -1,11 +1,12 @@
 const { app, BrowserWindow, Menu, Tray, nativeImage, screen, shell, ipcMain } = require('electron');
-const { spawn, execFileSync } = require('node:child_process');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const codex = require('./codex-client.cjs');
 const { startBridge } = require('./opencode-bridge.cjs');
 const { launchOpenCode } = require('./terminal-launcher.cjs');
 const { resolveDashboardUrl } = require('./dashboard-target.cjs');
+const { startLocalApi } = require('./api-startup.cjs');
 app.commandLine.appendSwitch('force-renderer-accessibility');
 
 const root = path.resolve(__dirname, '../..');
@@ -190,20 +191,11 @@ async function approveAndOpen(id) {
 }
 
 async function ensureApi() {
-  try { await requestJson(`${apiBase}/health`); return true; } catch { /* start local API below */ }
-  if (!apiProcess) {
-    apiProcess = spawn('node', ['--env-file-if-exists=.env', '--import', 'tsx', 'src/server.ts'], {
-      cwd: apiRoot,
-      env: { ...process.env, HOST: '127.0.0.1', PORT: '4317', RELAY_DB_PATH: path.join(apiRoot, 'data', 'relay.sqlite') },
-      windowsHide: true, stdio: 'ignore'
-    });
-    apiProcess.on('exit', () => { apiProcess = null; });
-  }
-  for (let i = 0; i < 20; i++) {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    try { await requestJson(`${apiBase}/health`); return true; } catch { /* keep waiting */ }
-  }
-  return false;
+  const result = await startLocalApi({ apiBase, apiRoot, dbPath: path.join(apiRoot, 'data', 'relay.sqlite') });
+  apiProcess = result.process;
+  if (apiProcess) apiProcess.once('exit', () => { apiProcess = null; });
+  currentState = { ...currentState, online: result.notice === 'Watching local projects', notice: result.notice };
+  return currentState.online;
 }
 
 async function pollActivity() {
@@ -235,7 +227,7 @@ async function pollActivity() {
     } : null, notice: completed ? 'Handoff retrieved' : 'Watching local projects' };
     sendState();
   } catch {
-    currentState = { ...currentState, online: false, notice: 'Relay service unavailable' };
+    currentState = { ...currentState, online: false, notice: currentState.notice === 'Watching local projects' ? 'Relay service unavailable' : currentState.notice };
     sendState();
   }
 }
@@ -265,7 +257,7 @@ app.whenReady().then(async () => {
   createWidget();
   createTray();
   const online = await ensureApi();
-  currentState = { ...currentState, online, notice: online ? 'Watching local projects' : 'Relay service unavailable' };
+  currentState = { ...currentState, online, notice: online ? 'Watching local projects' : currentState.notice };
   await pollActivity();
   pollTimer = setInterval(() => void pollActivity(), 2500);
 });

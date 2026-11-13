@@ -80,7 +80,7 @@ npm run build
 npm test
 ```
 
-Tests cover API persistence and handoff state, MCP protocol and scoped handoff retrieval, extraction behavior, and desktop chat redaction. They use temporary databases and synthetic context; they do not prove that a live model understood a handoff.
+`npm test` covers API persistence and handoff state, MCP protocol and scoped handoff retrieval, extraction behavior, desktop startup and chat redaction, and receipt export. Pull requests run the same tests and production build on Windows and macOS. The installed OpenCode end-to-end test uses a local mock provider and synthetic context; it does not prove that a live model understood a handoff.
 
 ## Deployment and launch status
 

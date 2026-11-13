@@ -13,7 +13,7 @@ npm install
 npm run desktop
 ```
 
-If `127.0.0.1:4317` is not already serving Relay, the companion starts the local API from `apps/api` and reads `apps/api/.env` there. Both the desktop app and dashboard use `apps/api/data/relay.sqlite` in development. The dashboard is still useful for reviewing and approving a package; the desktop app shows local activity and an arrival animation only after the API reports an approved-to-loaded state transition.
+If `127.0.0.1:4317` is not already serving Relay, the companion starts the local API from `apps/api` and reads `apps/api/.env` there. It verifies the Relay service identity before connecting, reports a clear startup message if Node.js is missing, and detects another service occupying the port. Both the desktop app and dashboard use `apps/api/data/relay.sqlite` in development. The dashboard is still useful for reviewing and approving a package; the desktop app shows local activity and an arrival animation only after the API reports an approved-to-loaded state transition.
 
 ## Controls and privacy
 
