@@ -78,6 +78,50 @@ test("SQLite project and memory persistence plus approved destination handoff fl
   assert.equal((await history.json() as any[]).length, 1);
 });
 
+test("MCP retrieves only an approved handoff for the intended destination", async () => {
+  const mcpRoot = join(temp, "mcp-project");
+  await mkdir(mcpRoot);
+  const project = await (await post(`${base}/projects`, { name: "MCP handoff fixture", rootPath: mcpRoot })).json() as any;
+  const item = await (await post(`${base}/projects/${project.id}/memory`, { kind: "task", content: "Finish the synthetic redirect", source: "user" })).json() as any;
+  const draft = await (await post(`${base}/projects/${project.id}/handoffs`, { source: "codex", destination: "opencode", memoryItemIds: [item.id] })).json() as any;
+  const mcp = spawn(process.execPath, ["--import", "tsx", "../mcp/src/index.ts"], {
+    cwd: resolve("."), env: { ...process.env, RELAY_API_URL: base }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+  });
+  let buffer = "";
+  const replies = new Map<number, any>();
+  mcp.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+    buffer += chunk;
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) if (line.trim()) { const message = JSON.parse(line); if (message.id) replies.set(message.id, message); }
+  });
+  async function call(id: number, method: string, params: unknown) {
+    mcp.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    for (let n = 0; n < 100 && !replies.has(id); n++) await delay(50);
+    assert.ok(replies.has(id), `MCP did not respond to ${method}`);
+    return replies.get(id);
+  }
+  const load = (id: number, destination: string) => call(id, "tools/call", { name: "relay_load_handoff", arguments: { handoffId: draft.id, destination } });
+  try {
+    const init = await call(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "relay-handoff-test", version: "1" } });
+    assert.equal(init.result.serverInfo.name, "relay-ai");
+    mcp.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+    assert.equal((await load(2, "opencode")).result.isError, true, "draft must not be available");
+    assert.equal((await post(`${base}/handoffs/${draft.id}/approve`, { includeItemIds: [item.id] })).status, 200);
+    assert.equal((await load(3, "codex")).result.isError, true, "wrong destination must not receive the package");
+    const received = await load(4, "opencode");
+    assert.notEqual(received.result.isError, true);
+    const payload = JSON.parse(received.result.content[0].text);
+    assert.equal(payload.handoff.status, "loaded");
+    assert.equal(payload.items[0].id, item.id);
+    assert.match(payload.items[0].content, /synthetic redirect/);
+  } finally {
+    mcp.stdin.end();
+    if (mcp.exitCode === null) mcp.kill();
+    await Promise.race([once(mcp, "close"), delay(2000)]);
+  }
+});
+
 test("project registration rejects a missing path and extraction works without Groq", async () => {
   const missing = await post(`${base}/projects`, { name: "missing", rootPath: join(temp, "missing") });
   assert.equal(missing.status, 400);
