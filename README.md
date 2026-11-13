@@ -10,7 +10,7 @@ Relay AI is a local-first context continuity tool for coding assistants. It keep
 - Extract candidate memory from notes with the configured AI provider, with a local fallback when the provider is unavailable. Review and save extracted items yourself.
 - Inspect Git status and selected repository evidence before approving a handoff. Relay distinguishes repository observations from claims made in chat.
 - Create a handoff draft, choose which memory to include, and explicitly approve it before the destination can retrieve the package.
-- Use the Windows desktop companion to choose a Codex chat, review and edit its text, and prepare a Codex-to-OpenCode handoff.
+- Use the desktop companion on Windows or macOS to choose a Codex chat, review and edit its text, and prepare a Codex-to-OpenCode handoff.
 
 ## Architecture
 
@@ -22,7 +22,7 @@ Coding agents ──MCP───┘            │
                                         Optional server-side extraction provider
 ```
 
-The dashboard is a Vite/React application. The local Node.js/TypeScript API owns project and handoff state in SQLite and inspects registered repositories. The MCP service exposes project context and handoff tools to supported assistants. The Electron companion runs separately from the dashboard, reads selected Codex chats through the local Codex app-server, and asks for human review before saving the selected text into Relay memory.
+The dashboard is a Vite/React application. The local Node.js/TypeScript API owns project and handoff state in SQLite and inspects registered repositories. The MCP service exposes project context and handoff tools to supported assistants. The Electron companion runs separately from the dashboard, reads selected Codex chats through the local Codex app-server, and asks for human review before saving the selected text into Relay memory. It can open OpenCode in a native terminal on Windows and macOS; Linux terminal launch remains an early path.
 
 The desktop handoff starts a password-protected OpenCode service on loopback and registers an MCP tool scoped to the approved handoff. Relay reports a package as loaded when the destination calls the retrieval endpoint; that confirms retrieval, not that a model understood the context. OpenCode's runtime MCP API is experimental, so the desktop flow checks the connection and reports failures.
 
@@ -84,7 +84,7 @@ Tests cover API persistence and handoff state, MCP protocol and scoped handoff r
 
 The frontend can be deployed to Vercel; see [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md). The API, SQLite memory, repository checks, and MCP service remain on the developer's machine. A hosted page can use the local API only from the same computer while Relay is running. Keep the API bound to loopback and configure `WEB_ORIGINS` for the expected browser origin.
 
-This repository is an individual local-first MVP. It is not ready for a multi-user hosted launch: the local API needs stronger access controls, and the desktop-to-OpenCode flow still needs a successful model-session retrieval test. OpenCode's runtime MCP endpoint is experimental. There is no packaged installer or native mobile app.
+This repository is an individual local-first MVP. Windows and macOS terminal launch paths are supported in source, but signed installers are not yet packaged. Browser origin, host, and cross-site request checks reduce web-based attacks, but the local API does not authenticate other local processes. The desktop-to-OpenCode model-session retrieval test still fails because the model is not offered Relay's connected tool. OpenCode's runtime MCP endpoint is experimental. There is no native mobile app.
 
 ## Trust and privacy
 

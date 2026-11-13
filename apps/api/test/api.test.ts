@@ -7,6 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import { request as httpRequest } from "node:http";
 
 const port = 44317 + Math.floor(Math.random() * 1000);
 const base = `http://127.0.0.1:${port}/api/v1`;
@@ -43,6 +44,25 @@ after(async () => {
 });
 
 const post = async (url: string, data: unknown) => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+
+test("local API rejects hostile Host and cross-site browser requests", async () => {
+  const hostileHost = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const target = new URL(`${base}/health`);
+    const request = httpRequest({ hostname: target.hostname, port: target.port, path: target.pathname, headers: { host: "attacker.example" } }, response => {
+      let body = ""; response.setEncoding("utf8").on("data", chunk => body += chunk).on("end", () => resolve({ status: response.statusCode ?? 0, body }));
+    });
+    request.on("error", reject); request.end();
+  });
+  assert.equal(hostileHost.status, 403);
+  assert.equal(JSON.parse(hostileHost.body).error.code, "HOST_NOT_ALLOWED");
+  const hostileOrigin = await fetch(`${base}/projects`, { headers: { origin: "https://attacker.example" } });
+  assert.equal(hostileOrigin.status, 403);
+  assert.equal((await hostileOrigin.json() as any).error.code, "ORIGIN_NOT_ALLOWED");
+  const crossSite = await fetch(`${base}/health`, { headers: { "sec-fetch-site": "cross-site" } });
+  assert.equal(crossSite.status, 403);
+  assert.equal((await crossSite.json() as any).error.code, "CROSS_SITE_REQUEST");
+  assert.equal((await fetch(`${base}/health`)).status, 200, "local desktop and MCP requests without browser metadata remain usable");
+});
 
 test("SQLite project and memory persistence plus approved destination handoff flow", async () => {
   const created = await post(`${base}/projects`, { name: "Relay fixture", rootPath: projectRoot });

@@ -93,7 +93,18 @@ function updateHandoff(h: Handoff) {
 
 async function route(req: IncomingMessage, res: ServerResponse) {
   const origin = req.headers.origin;
+  const host = req.headers.host ?? "";
+  let requestHost: URL;
+  try { requestHost = new URL(`http://${host}`); }
+  catch { return fail(res, 400, "INVALID_HOST", "The Relay API requires a valid loopback Host header"); }
+  if (!["127.0.0.1", "localhost", "[::1]"].includes(requestHost.hostname)) {
+    return fail(res, 403, "HOST_NOT_ALLOWED", "The Relay API accepts loopback Host headers only", origin);
+  }
   if (origin && !allowedOrigins.has(origin)) return fail(res, 403, "ORIGIN_NOT_ALLOWED", "This origin is not allowed to access the Relay service", origin);
+  // Browser requests identify their site even when Origin is omitted on a
+  // simple GET. Reject cross-site browser fetches; native desktop/MCP callers
+  // have no Fetch Metadata headers and remain supported over loopback.
+  if (req.headers["sec-fetch-site"] === "cross-site") return fail(res, 403, "CROSS_SITE_REQUEST", "Cross-site browser requests cannot access the local Relay service", origin);
   if (req.method === "OPTIONS") {
     res.writeHead(204, { "access-control-allow-origin": origin && allowedOrigins.has(origin) ? origin : "null", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type", "access-control-max-age": "600", vary: "Origin" });
     return res.end();

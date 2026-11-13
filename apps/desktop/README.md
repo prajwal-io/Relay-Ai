@@ -1,6 +1,6 @@
 # Relay AI desktop companion
 
-The Electron companion runs as a separate Windows desktop process with a tray icon and a compact always-on-top widget. It polls Relay's loopback API for project and handoff state. When explicitly requested, it lists local Codex chats through Codex app-server and reads the selected chat for review.
+The Electron companion runs as a separate Windows or macOS desktop process with a tray icon and a compact always-on-top widget. It polls Relay's loopback API for project and handoff state. When explicitly requested, it lists local Codex chats through Codex app-server and reads the selected chat for review. Linux terminal launch remains experimental.
 
 ## Run
 
@@ -20,7 +20,7 @@ If `127.0.0.1:4317` is not already serving Relay, the companion starts the local
 - The animation is driven by persisted handoff status; it is not a simulated transfer.
 - The activity monitor receives handoff title, route, item count, and verification label. The chat review reads the selected conversation only after you choose it.
 - The API remains bound to loopback and the API key remains in the API process.
-- Windows startup registration and a packaged installer are not included yet.
+- Login startup registration and signed Windows/macOS installers are not included yet.
 
 ## Switch a Codex chat to OpenCode
 
