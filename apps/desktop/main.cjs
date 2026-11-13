@@ -147,10 +147,22 @@ async function prepareChatDraft(text) {
   if (!project) project = await postApi('/projects', { name: path.basename(projectPath) || 'Codex project', rootPath: projectPath });
   const chunks = text.match(/[\s\S]{1,12000}/g) || [];
   if (chunks.length > 24) throw new Error('This chat is too long for one handoff. Shorten the reviewed text.');
+  // Keep the local API round-trips bounded and concurrent. A long chat used
+  // to incur up to 24 sequential requests before the user could review the
+  // draft, which made a local handoff feel stalled even though no model call
+  // was involved.
   const memoryIds = [];
-  for (let index = 0; index < chunks.length; index++) {
-    const item = await postApi(`/projects/${encodeURIComponent(project.id)}/memory`, { kind: 'note', source: 'user', tags: ['codex-chat'], content: `[Codex chat · part ${index + 1}/${chunks.length}]\n${chunks[index]}` });
-    memoryIds.push(item.id);
+  const batchSize = 6;
+  for (let start = 0; start < chunks.length; start += batchSize) {
+    const batch = chunks.slice(start, start + batchSize);
+    const items = await Promise.all(batch.map((chunk, offset) => {
+      const index = start + offset;
+      return postApi(`/projects/${encodeURIComponent(project.id)}/memory`, {
+        kind: 'note', source: 'user', tags: ['codex-chat'],
+        content: `[Codex chat · part ${index + 1}/${chunks.length}]\n${chunk}`,
+      });
+    }));
+    memoryIds.push(...items.map(item => item.id));
   }
   const draft = await postApi(`/projects/${encodeURIComponent(project.id)}/handoffs`, { source: 'codex', destination: 'opencode', title: selectedChat.title, memoryItemIds: memoryIds });
   preparedDraft = { id: draft.id, projectId: project.id, projectPath: project.rootPath, text, memoryIds, evidence: draft.evidence || [] };
