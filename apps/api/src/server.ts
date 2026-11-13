@@ -193,6 +193,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     let handoff = loadHandoff(path[1]);
     if (path.length === 3 && path[2] === "approve" && method === "POST") {
       if (handoff.status !== "draft") return fail(res, 409, "INVALID_HANDOFF_STATE", "Only draft handoffs can be approved", origin);
+      if (!(await snapshotIsCurrent(handoff))) return fail(res, 409, "REPOSITORY_CHANGED", "Repository state changed after this handoff was prepared; create and review a new draft", origin);
       const data = await body(req);
       if (Array.isArray(data.includeItemIds)) {
         const requested: string[] = [...new Set<string>(data.includeItemIds.filter((x: unknown): x is string => typeof x === "string"))];
@@ -206,12 +207,8 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       if (typeof data.destination !== "string") return fail(res, 400, "DESTINATION_REQUIRED", "The destination assistant is required", origin);
       if (data.destination !== handoff.destination) return fail(res, 403, "DESTINATION_MISMATCH", "This package was approved for a different destination", origin);
       if (handoff.status !== "approved" && handoff.status !== "loaded") return fail(res, 409, "HANDOFF_NOT_APPROVED", "Approve the handoff before loading it into a destination", origin);
+      if (!(await snapshotIsCurrent(handoff))) return fail(res, 409, "REPOSITORY_CHANGED", "Repository state changed after this handoff was prepared; create and review a new draft", origin);
       if (handoff.status === "approved") {
-        const snapshot = handoff.evidence.find((entry) => entry.kind === "git-status" && entry.description.startsWith("Repository snapshot:"));
-        if (snapshot) {
-          const current = (await getGitState(loadProject(handoff.projectId).rootPath))[0];
-          if (current.description !== snapshot.description) return fail(res, 409, "REPOSITORY_CHANGED", "Repository state changed after this handoff was prepared; create and review a new draft", origin);
-        }
         handoff = { ...handoff, status: "loaded", loadedAt: new Date().toISOString() };
         updateHandoff(handoff);
       }
@@ -222,6 +219,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       if (!destination) return fail(res, 400, "DESTINATION_REQUIRED", "The destination assistant is required", origin);
       if (destination !== handoff.destination) return fail(res, 403, "DESTINATION_MISMATCH", "This package was approved for a different destination", origin);
       if (handoff.status !== "approved" && handoff.status !== "loaded") return fail(res, 409, "HANDOFF_NOT_APPROVED", "This context is not available until the handoff is approved", origin);
+      if (!(await snapshotIsCurrent(handoff))) return fail(res, 409, "REPOSITORY_CHANGED", "Repository state changed after this handoff was prepared; create and review a new draft", origin);
       return json(res, 200, { handoff, items: memoryByIds(handoff.projectId, handoff.memoryItemIds) }, origin);
     }
   }
@@ -230,6 +228,12 @@ async function route(req: IncomingMessage, res: ServerResponse) {
 
 function memoryByIds(projectId: string, ids: string[]): MemoryItem[] {
   return ids.map((id) => db.prepare("SELECT * FROM memory_items WHERE id=? AND project_id=?").get(id,projectId)).filter(Boolean).map((r: any) => memoryFrom(r));
+}
+async function snapshotIsCurrent(handoff: Handoff): Promise<boolean> {
+  const snapshot = handoff.evidence.find((entry) => entry.kind === "git-status" && entry.description.startsWith("Repository snapshot:"));
+  if (!snapshot) return true;
+  const current = (await getGitState(loadProject(handoff.projectId).rootPath))[0];
+  return current.description === snapshot.description;
 }
 async function getGitState(root: string): Promise<Evidence[]> {
   const observedAt = new Date().toISOString();

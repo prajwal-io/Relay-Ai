@@ -116,4 +116,20 @@ test("explicit handoff items stay project-scoped and tracked changes invalidate 
   const stale = await post(`${base}/handoffs/${draft.id}/load`, { destination: "opencode" });
   assert.equal(stale.status, 409);
   assert.equal((await stale.json() as any).error.code, "REPOSITORY_CHANGED");
+  const stalePreview = await fetch(`${base}/handoffs/${draft.id}/context?destination=opencode`);
+  assert.equal(stalePreview.status, 409);
+  assert.equal((await stalePreview.json() as any).error.code, "REPOSITORY_CHANGED");
+
+  const dirtyDraft = await (await post(`${base}/projects/${project.id}/handoffs`, { source: "codex", destination: "opencode", memoryItemIds: [item.id] })).json() as any;
+  await writeFile(join(root, "example.txt"), "different tracked contents, still dirty\n");
+  const staleApproval = await post(`${base}/handoffs/${dirtyDraft.id}/approve`, { includeItemIds: [item.id] });
+  assert.equal(staleApproval.status, 409);
+  assert.equal((await staleApproval.json() as any).error.code, "REPOSITORY_CHANGED");
+
+  const freshDraft = await (await post(`${base}/projects/${project.id}/handoffs`, { source: "codex", destination: "opencode", memoryItemIds: [item.id] })).json() as any;
+  assert.equal((await post(`${base}/handoffs/${freshDraft.id}/approve`, { includeItemIds: [item.id] })).status, 200);
+  assert.equal((await post(`${base}/handoffs/${freshDraft.id}/load`, { destination: "opencode" })).status, 200);
+  await writeFile(join(root, "example.txt"), "changed after loading\n");
+  assert.equal((await fetch(`${base}/handoffs/${freshDraft.id}/context?destination=opencode`)).status, 409);
+  assert.equal((await post(`${base}/handoffs/${freshDraft.id}/load`, { destination: "opencode" })).status, 409);
 });
