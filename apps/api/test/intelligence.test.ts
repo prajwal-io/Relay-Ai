@@ -62,6 +62,9 @@ test("Groq timeouts use local extraction", async () => {
   const oldKey = process.env.GROQ_API_KEY;
   const oldTimeout = process.env.GROQ_TIMEOUT_MS;
   const oldFetch = globalThis.fetch;
+  // AbortSignal.timeout() uses an unreferenced timer in Node. Keep this test
+  // process alive until the fake provider observes it, including on CI.
+  const keepAlive = setTimeout(() => {}, 1500);
   process.env.GROQ_API_KEY = "test-key";
   process.env.GROQ_TIMEOUT_MS = "1000";
   try {
@@ -72,6 +75,7 @@ test("Groq timeouts use local extraction", async () => {
     assert.equal(result.engine, "local-fallback");
     assert.match(result.notice ?? "", /timed out/i);
   } finally {
+    clearTimeout(keepAlive);
     globalThis.fetch = oldFetch;
     if (oldKey === undefined) delete process.env.GROQ_API_KEY;
     else process.env.GROQ_API_KEY = oldKey;

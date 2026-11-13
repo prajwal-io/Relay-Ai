@@ -7,6 +7,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import { request as httpRequest } from "node:http";
+import { DatabaseSync } from "node:sqlite";
 
 const port = 44317 + Math.floor(Math.random() * 1000);
 const base = `http://127.0.0.1:${port}/api/v1`;
@@ -44,6 +46,33 @@ after(async () => {
 
 const post = async (url: string, data: unknown) => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
 
+test("local API rejects hostile Host and cross-site browser requests", async () => {
+  const hostileHost = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const target = new URL(`${base}/health`);
+    const request = httpRequest({ hostname: target.hostname, port: target.port, path: target.pathname, headers: { host: "attacker.example" } }, response => {
+      let body = ""; response.setEncoding("utf8").on("data", chunk => body += chunk).on("end", () => resolve({ status: response.statusCode ?? 0, body }));
+    });
+    request.on("error", reject); request.end();
+  });
+  assert.equal(hostileHost.status, 403);
+  assert.equal(JSON.parse(hostileHost.body).error.code, "HOST_NOT_ALLOWED");
+  const hostileOrigin = await fetch(`${base}/projects`, { headers: { origin: "https://attacker.example" } });
+  assert.equal(hostileOrigin.status, 403);
+  assert.equal((await hostileOrigin.json() as any).error.code, "ORIGIN_NOT_ALLOWED");
+  const crossSite = await fetch(`${base}/health`, { headers: { "sec-fetch-site": "cross-site" } });
+  assert.equal(crossSite.status, 403);
+  assert.equal((await crossSite.json() as any).error.code, "CROSS_SITE_REQUEST");
+  const unsupportedMethod = await fetch(`${base}/projects`, { method: "DELETE" });
+  assert.equal(unsupportedMethod.status, 405);
+  assert.equal(unsupportedMethod.headers.get("allow"), "GET, POST, OPTIONS");
+  const wrongContentType = await fetch(`${base}/projects`, { method: "POST", headers: { "content-type": "text/plain" }, body: "{}" });
+  assert.equal(wrongContentType.status, 415);
+  assert.equal((await wrongContentType.json() as any).error.code, "JSON_REQUIRED");
+  const health = await fetch(`${base}/health`);
+  assert.equal(health.status, 200, "local desktop and MCP requests without browser metadata remain usable");
+  assert.equal((await health.json() as any).service, "relay-ai", "desktop startup can distinguish Relay from another local service on the port");
+});
+
 test("SQLite project and memory persistence plus approved destination handoff flow", async () => {
   const created = await post(`${base}/projects`, { name: "Relay fixture", rootPath: projectRoot });
   assert.equal(created.status, 201);
@@ -60,10 +89,21 @@ test("SQLite project and memory persistence plus approved destination handoff fl
   const handoff = await handoffResponse.json() as any;
   assert.equal(handoff.status, "draft");
   assert.ok(handoff.memoryItemIds.includes(item.id));
+  const emptyReceipt = await (await fetch(`${base}/handoffs/${handoff.id}/receipt`)).json() as any;
+  assert.equal(emptyReceipt.retrievalCount, 0);
+  assert.deepEqual(emptyReceipt.retrievals, []);
   assert.equal((await fetch(`${base}/handoffs/${handoff.id}/context?destination=codex`)).status, 409);
 
   const approved = await post(`${base}/handoffs/${handoff.id}/approve`, { includeItemIds: [item.id] });
   assert.equal(approved.status, 200);
+  const directDb = new DatabaseSync(join(temp, "relay.sqlite"));
+  directDb.exec("CREATE TRIGGER fail_receipt_insert BEFORE INSERT ON handoff_receipts BEGIN SELECT RAISE(FAIL, 'synthetic receipt storage failure'); END");
+  const failedLoad = await post(`${base}/handoffs/${handoff.id}/load`, { destination: "codex" });
+  assert.equal(failedLoad.status, 500, "a receipt storage failure is returned to the caller");
+  const afterFailedLoad = (await (await fetch(`${base}/projects/${project.id}/handoffs`)).json() as any[])[0];
+  assert.equal(afterFailedLoad.status, "approved", "loaded state and retrieval receipt are committed atomically");
+  directDb.exec("DROP TRIGGER fail_receipt_insert");
+  directDb.close();
   assert.equal((await post(`${base}/handoffs/${handoff.id}/load`, { destination: "opencode" })).status, 403);
   const loaded = await post(`${base}/handoffs/${handoff.id}/load`, { destination: "codex" });
   assert.equal(loaded.status, 200);
@@ -73,6 +113,17 @@ test("SQLite project and memory persistence plus approved destination handoff fl
   const replay = await post(`${base}/handoffs/${handoff.id}/load`, { destination: "codex" });
   assert.equal(replay.status, 200);
   assert.equal((await replay.json() as any).items[0].id, item.id);
+  const receipt = await (await fetch(`${base}/handoffs/${handoff.id}/receipt`)).json() as any;
+  assert.equal(receipt.handoffId, handoff.id);
+  assert.equal(receipt.destination, "codex");
+  assert.deepEqual(receipt.approvedItemIds, [item.id]);
+  assert.equal(receipt.approvedItems[0].content, "Finish the login redirect", "receipt retains the exact approved context returned at retrieval time");
+  assert.equal(receipt.repositoryStatus, "unverified", "non-git folders are never labeled verified");
+  assert.equal(receipt.retrievalCount, 2, "each successful retrieval endpoint call gets a receipt");
+  assert.equal(receipt.retrievals.length, 2);
+  assert.equal(receipt.retrievals[0].approvedItems[0].id, item.id);
+  assert.ok(receipt.retrievals.every((entry: any) => entry.retrievedAt && entry.destination === "codex"));
+  assert.ok(Array.isArray(receipt.evidence));
   assert.equal((await fetch(`${base}/handoffs/${handoff.id}/context?destination=opencode`)).status, 403);
   const history = await fetch(`${base}/projects/${project.id}/handoffs`);
   assert.equal((await history.json() as any[]).length, 1);
@@ -176,4 +227,7 @@ test("explicit handoff items stay project-scoped and tracked changes invalidate 
   await writeFile(join(root, "example.txt"), "changed after loading\n");
   assert.equal((await fetch(`${base}/handoffs/${freshDraft.id}/context?destination=opencode`)).status, 409);
   assert.equal((await post(`${base}/handoffs/${freshDraft.id}/load`, { destination: "opencode" })).status, 409);
+  const staleReceipt = await (await fetch(`${base}/handoffs/${freshDraft.id}/receipt`)).json() as any;
+  assert.equal(staleReceipt.repositoryStatus, "stale", "receipts surface repository drift after retrieval");
+  assert.equal(staleReceipt.approvedItems[0].content, item.content, "the receipt preserves the retrieved text even if the repository later changes");
 });
