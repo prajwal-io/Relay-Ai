@@ -31,4 +31,10 @@ db.exec(`
     memory_ids_json TEXT NOT NULL, evidence_json TEXT NOT NULL, verification TEXT NOT NULL,
     status TEXT NOT NULL, created_at TEXT NOT NULL, approved_at TEXT, loaded_at TEXT
   );
+  CREATE TABLE IF NOT EXISTS handoff_receipts (
+    id TEXT PRIMARY KEY, handoff_id TEXT NOT NULL REFERENCES handoffs(id) ON DELETE CASCADE,
+    destination TEXT NOT NULL, approved_item_ids_json TEXT NOT NULL,
+    repository_snapshot TEXT, evidence_json TEXT NOT NULL, retrieved_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS handoff_receipts_history ON handoff_receipts(handoff_id, retrieved_at DESC);
 `);

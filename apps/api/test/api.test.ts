@@ -80,6 +80,9 @@ test("SQLite project and memory persistence plus approved destination handoff fl
   const handoff = await handoffResponse.json() as any;
   assert.equal(handoff.status, "draft");
   assert.ok(handoff.memoryItemIds.includes(item.id));
+  const emptyReceipt = await (await fetch(`${base}/handoffs/${handoff.id}/receipt`)).json() as any;
+  assert.equal(emptyReceipt.retrievalCount, 0);
+  assert.deepEqual(emptyReceipt.retrievals, []);
   assert.equal((await fetch(`${base}/handoffs/${handoff.id}/context?destination=codex`)).status, 409);
 
   const approved = await post(`${base}/handoffs/${handoff.id}/approve`, { includeItemIds: [item.id] });
@@ -93,6 +96,14 @@ test("SQLite project and memory persistence plus approved destination handoff fl
   const replay = await post(`${base}/handoffs/${handoff.id}/load`, { destination: "codex" });
   assert.equal(replay.status, 200);
   assert.equal((await replay.json() as any).items[0].id, item.id);
+  const receipt = await (await fetch(`${base}/handoffs/${handoff.id}/receipt`)).json() as any;
+  assert.equal(receipt.handoffId, handoff.id);
+  assert.equal(receipt.destination, "codex");
+  assert.deepEqual(receipt.approvedItemIds, [item.id]);
+  assert.equal(receipt.retrievalCount, 2, "each successful retrieval endpoint call gets a receipt");
+  assert.equal(receipt.retrievals.length, 2);
+  assert.ok(receipt.retrievals.every((entry: any) => entry.retrievedAt && entry.destination === "codex"));
+  assert.ok(Array.isArray(receipt.evidence));
   assert.equal((await fetch(`${base}/handoffs/${handoff.id}/context?destination=opencode`)).status, 403);
   const history = await fetch(`${base}/projects/${project.id}/handoffs`);
   assert.equal((await history.json() as any[]).length, 1);

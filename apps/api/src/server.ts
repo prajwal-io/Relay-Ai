@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { db } from "./db.js";
 import { collectRepositoryEvidence, validateRootPath } from "./repository.js";
-import type { AgentKind, Evidence, Handoff, MemoryItem, MemoryKind, Project } from "../../../packages/shared/src/contracts.js";
+import type { AgentKind, Evidence, Handoff, HandoffReceipt, HandoffReceiptEntry, MemoryItem, MemoryKind, Project } from "../../../packages/shared/src/contracts.js";
 import { configuredExtractionProvider, extractContext } from "./intelligence.js";
 
 const API = "/api/v1";
@@ -223,7 +223,25 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         handoff = { ...handoff, status: "loaded", loadedAt: new Date().toISOString() };
         updateHandoff(handoff);
       }
+      // This is a receipt for an approved retrieval endpoint call only. It is
+      // not evidence that a destination model read or understood the result.
+      const retrievedAt = new Date().toISOString();
+      const snapshot = handoff.evidence.find((entry) => entry.kind === "git-status" && entry.description.startsWith("Repository snapshot:"))?.description;
+      db.prepare("INSERT INTO handoff_receipts (id,handoff_id,destination,approved_item_ids_json,repository_snapshot,evidence_json,retrieved_at) VALUES (?,?,?,?,?,?,?)")
+        .run(randomUUID(), handoff.id, data.destination, JSON.stringify(handoff.memoryItemIds), snapshot ?? null, JSON.stringify(handoff.evidence), retrievedAt);
       return json(res, 200, { handoff, items: memoryByIds(handoff.projectId, handoff.memoryItemIds) }, origin);
+    }
+    if (path.length === 3 && path[2] === "receipt" && method === "GET") {
+      const rows = db.prepare("SELECT * FROM handoff_receipts WHERE handoff_id=? ORDER BY retrieved_at ASC, rowid ASC").all(handoff.id) as any[];
+      const retrievals: HandoffReceiptEntry[] = rows.map((row) => ({
+        id: row.id, destination: row.destination, approvedItemIds: JSON.parse(row.approved_item_ids_json),
+        ...(row.repository_snapshot ? { repositorySnapshot: row.repository_snapshot } : {}),
+        evidence: JSON.parse(row.evidence_json), retrievedAt: row.retrieved_at,
+      }));
+      const latest = retrievals.at(-1);
+      if (!latest) return json(res, 200, { handoffId: handoff.id, destination: handoff.destination, approvedItemIds: handoff.memoryItemIds, ...(handoff.evidence.find((entry) => entry.kind === "git-status" && entry.description.startsWith("Repository snapshot:")) ? { repositorySnapshot: handoff.evidence.find((entry) => entry.kind === "git-status" && entry.description.startsWith("Repository snapshot:"))!.description } : {}), evidence: handoff.evidence, retrievedAt: null, retrievalCount: 0, retrievals: [] }, origin);
+      const receipt: HandoffReceipt = { handoffId: handoff.id, destination: latest.destination, approvedItemIds: latest.approvedItemIds, ...(latest.repositorySnapshot ? { repositorySnapshot: latest.repositorySnapshot } : {}), evidence: latest.evidence, retrievedAt: latest.retrievedAt, retrievalCount: retrievals.length, retrievals };
+      return json(res, 200, receipt, origin);
     }
     if (path.length === 3 && path[2] === "context" && method === "GET") {
       const destination = url.searchParams.get("destination");
