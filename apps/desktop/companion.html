@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light"><title>Relay desktop companion</title>
+  <link rel="stylesheet" href="./companion.css">
+</head>
+<body>
+  <main class="widget" id="widget" aria-live="polite">
+    <button class="capsule" id="toggle" aria-expanded="false" aria-controls="panel" aria-label="Open Relay desktop companion">
+      <span class="move-grip" title="Drag to move" aria-label="Drag to move"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      <span class="relay-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5 10.5h8.5a5.5 5.5 0 0 1 0 11H5v-5.8h8.5a.8.8 0 1 0 0-1.6H5z"/><path d="M27 21.5h-8.5a5.5 5.5 0 0 1 0-11H27v5.8h-8.5a.8.8 0 1 0 0 1.6H27z"/><path d="M11 16h10" class="cut"/></svg></span>
+      <span class="capsule-copy"><strong>Relay</strong><small><i class="status-dot" id="status-dot"></i><span id="capsule-status">Connecting locally</span></small></span>
+      <span class="capsule-route" aria-hidden="true"><i></i><b>R</b><i></i></span>
+      <span class="expand-glyph" aria-hidden="true">↗</span>
+    </button>
+    <section class="panel" id="panel" aria-hidden="true" inert>
+      <header class="panel-head"><div class="agent-presence"><i class="status-dot" id="panel-dot"></i><span id="presence-label">RELAY IS LISTENING LOCALLY</span></div><span class="move-cue"><i></i><i></i><i></i><i></i><i></i><i></i> DRAG TO MOVE</span><div class="head-actions"><button class="dashboard-link" id="dashboard">Open dashboard <span aria-hidden="true">↗</span></button><button class="close" id="close" aria-label="Collapse companion">×</button></div></header>
+      <div id="monitor-view"><div class="panel-title"><div><h1 id="panel-title">A thread, carried forward.</h1><p id="panel-subtitle">Relay watches approved context move between your coding assistants.</p></div><span class="handoff-state" id="handoff-state">STANDING BY</span></div>
+      <div class="route" id="route" aria-label="Handoff route from source assistant through Relay to destination assistant">
+        <div class="agent source-agent"><span class="agent-icon opencode" id="source-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4.5h14v15H5z"/><path d="M9 9h6v6H9z"/></svg></span><span id="source-name">OpenCode</span><small id="source-state">SOURCE APP</small></div>
+        <div class="signal"><i class="signal-line"></i><i class="packet"></i><span>CONTEXT</span></div>
+        <div class="relay-core" id="relay-core"><span class="core-mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 10.5h8.5a5.5 5.5 0 0 1 0 11H5v-5.8h8.5a.8.8 0 1 0 0-1.6H5z"/><path d="M27 21.5h-8.5a5.5 5.5 0 0 1 0-11H27v5.8h-8.5a.8.8 0 1 0 0 1.6H27z"/></svg></span><small>RELAY</small><b class="verified" id="verified-mark">·</b></div>
+        <div class="signal signal-right"><i class="signal-line"></i><i class="packet"></i><span>APPROVED DATA</span></div>
+        <div class="agent destination-agent"><span class="agent-icon codex" id="destination-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 15 5v3.5l3 1.5v4l-3 1.5V19l-3 1.5L9 19v-3.5L6 14v-4l3-1.5V5z"/><path d="m9 5 6 3.5M6 10l6 3.5m3 2 3-1.5M9 16v3"/></svg></span><span id="destination-name">Codex</span><small id="destination-state">DESTINATION</small></div>
+      </div>
+      <section class="handoff-card" id="handoff-card" aria-live="polite">
+        <div class="handoff-card-top"><span class="record-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M4 3.5h8l4 4V16a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 4 16z"/><path d="M12 3.5v4h4M7 11h6M7 14h4"/></svg></span><span class="handoff-copy"><strong id="handoff-title">No handoff in progress</strong><small id="handoff-meta">When a package is loaded, its route and verification appear here.</small></span><span class="item-count" id="item-count">—</span></div>
+        <div class="steps" id="steps"><span class="step"><i></i><b>Prepared</b></span><i class="step-line"></i><span class="step"><i></i><b>Approved</b></span><i class="step-line"></i><span class="step"><i></i><b>Loaded</b></span></div>
+      </section>
+      <footer class="panel-footer"><span id="local-status"><i class="status-dot"></i> Local service · connecting</span><button type="button" class="primary-action" id="start-switch">Switch a Codex chat <span aria-hidden="true">→</span></button></footer></div>
+      <section class="workflow" id="switch-workflow" hidden aria-label="Switch a Codex chat to OpenCode">
+        <button type="button" class="back-link" id="back-monitor">← Back to activity</button>
+        <div class="workflow-heading"><div><h1>Continue in OpenCode.</h1><p>Choose a Codex chat, review its text, and check repository evidence before opening the next session.</p></div><span class="workflow-route" aria-hidden="true"><b><img src="./assets/codex.png" alt=""></b><i></i><b class="route-relay"><svg viewBox="0 0 32 32"><path d="M5 10.5h8.5a5.5 5.5 0 0 1 0 11H5v-5.8h8.5a.8.8 0 1 0 0-1.6H5zM27 21.5h-8.5a5.5 5.5 0 0 1 0-11H27v5.8h-8.5a.8.8 0 1 0 0 1.6H27z"/></svg></b><i></i><b><img src="./assets/opencode.svg" alt=""></b></span></div>
+        <div class="workflow-stage" id="chat-stage"><div class="stage-heading"><div><h2>Choose a chat</h2><p>Local Codex sessions, most recently updated first.</p></div><button type="button" class="text-button" id="refresh-chats">Refresh</button></div><div class="chat-list" id="chat-list" role="list" aria-label="Codex chats"></div></div>
+        <div class="workflow-stage" id="review-stage" hidden><div class="stage-heading"><div><h2>Review the conversation</h2><p id="review-meta"></p></div><button type="button" class="text-button" id="change-chat">Change chat</button></div><label class="review-label" for="chat-context">Context to carry forward</label><textarea id="chat-context" spellcheck="false"></textarea><p class="review-note">Common credentials are masked, but redaction can miss sensitive data. Tool outputs, reasoning and attachments are excluded. Preparing saves this reviewed text locally.</p><button type="button" class="primary-action workflow-action" id="prepare-chat">Prepare repository check <span aria-hidden="true">→</span></button></div>
+        <div class="workflow-stage" id="evidence-stage" hidden><div class="stage-heading"><div><h2>Review the handoff</h2><p id="evidence-meta"></p></div><button type="button" class="text-button" id="edit-context">Edit context</button></div><div class="evidence-list" id="draft-evidence"></div><p class="review-note" id="evidence-note"></p><button type="button" class="primary-action workflow-action" id="launch-opencode">Approve and open OpenCode <span aria-hidden="true">→</span></button></div>
+        <div class="workflow-stage" id="opened-stage" hidden><div class="launch-art" id="launch-art" aria-hidden="true"><span><img src="./assets/codex.png" alt=""></span><i></i><span class="launch-relay"><svg viewBox="0 0 32 32"><path d="M5 10.5h8.5a5.5 5.5 0 0 1 0 11H5v-5.8h8.5a.8.8 0 1 0 0-1.6H5zM27 21.5h-8.5a5.5 5.5 0 0 1 0-11H27v5.8h-8.5a.8.8 0 1 0 0 1.6H27z"/></svg></span><i></i><span><img src="./assets/opencode.svg" alt=""></span></div><h2>OpenCode is opening.</h2><p class="opened-copy">OpenCode has been asked to retrieve your approved handoff. Relay will show activity when the package is requested; opening the terminal alone does not confirm retrieval.</p><button type="button" class="primary-action workflow-action" id="done-switch">Back to activity <span aria-hidden="true">→</span></button></div>
+        <p class="workflow-status" id="workflow-status" role="status" aria-live="polite"></p>
+      </section>
+    </section>
+  </main>
+  <script src="./companion.js"></script>
+</body>
+</html>

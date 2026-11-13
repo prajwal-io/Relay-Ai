@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { db } from "./db.js";
@@ -168,10 +168,16 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   if (path[0] === "projects" && path[1] && path[2] === "handoffs" && method === "POST") {
     const project = loadProject(path[1]); const data = await body(req);
     if (!agentKinds.has(data.source) || !agentKinds.has(data.destination) || data.source === data.destination) return fail(res, 400, "INVALID_AGENTS", "Choose two different supported agents", origin);
-    const candidates = rankItems(allMemory(project.id), typeof data.query === "string" ? data.query : "");
+    let candidates: MemoryItem[];
+    if (data.memoryItemIds !== undefined) {
+      if (!Array.isArray(data.memoryItemIds) || data.memoryItemIds.length === 0 || data.memoryItemIds.length > 24 || data.memoryItemIds.some((id: unknown) => typeof id !== "string")) return fail(res, 400, "INVALID_ITEMS", "Choose between 1 and 24 project memory items", origin);
+      const ids = [...new Set<string>(data.memoryItemIds)];
+      candidates = memoryByIds(project.id, ids);
+      if (candidates.length !== ids.length) return fail(res, 400, "ITEM_NOT_IN_PROJECT", "Every selected item must belong to this project", origin);
+    } else candidates = rankItems(allMemory(project.id), typeof data.query === "string" ? data.query : "");
     const [repo, gitState] = await Promise.all([collectRepositoryEvidence(project.rootPath, candidates), getGitState(project.rootPath)]);
     const evidence = [...gitState, ...repo.evidence.filter((entry) => entry.kind !== "git-status")];
-    const items = candidates.filter((item) => item.kind !== "file" || item.status !== "open").slice(0, 24);
+    const items = (data.memoryItemIds !== undefined ? candidates : candidates.filter((item) => item.kind !== "file" || item.status !== "open")).slice(0, 24);
     const now = new Date().toISOString();
     const itemEvidence = repo.evidence.filter((e) => e.kind !== "git-status");
     const verification = repo.conflicts.length ? "conflict" : itemEvidence.some((e) => e.status === "verified") ? "partial" : "unverified";
@@ -187,6 +193,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     let handoff = loadHandoff(path[1]);
     if (path.length === 3 && path[2] === "approve" && method === "POST") {
       if (handoff.status !== "draft") return fail(res, 409, "INVALID_HANDOFF_STATE", "Only draft handoffs can be approved", origin);
+      if (!(await snapshotIsCurrent(handoff))) return fail(res, 409, "REPOSITORY_CHANGED", "Repository state changed after this handoff was prepared; create and review a new draft", origin);
       const data = await body(req);
       if (Array.isArray(data.includeItemIds)) {
         const requested: string[] = [...new Set<string>(data.includeItemIds.filter((x: unknown): x is string => typeof x === "string"))];
@@ -200,6 +207,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       if (typeof data.destination !== "string") return fail(res, 400, "DESTINATION_REQUIRED", "The destination assistant is required", origin);
       if (data.destination !== handoff.destination) return fail(res, 403, "DESTINATION_MISMATCH", "This package was approved for a different destination", origin);
       if (handoff.status !== "approved" && handoff.status !== "loaded") return fail(res, 409, "HANDOFF_NOT_APPROVED", "Approve the handoff before loading it into a destination", origin);
+      if (!(await snapshotIsCurrent(handoff))) return fail(res, 409, "REPOSITORY_CHANGED", "Repository state changed after this handoff was prepared; create and review a new draft", origin);
       if (handoff.status === "approved") {
         handoff = { ...handoff, status: "loaded", loadedAt: new Date().toISOString() };
         updateHandoff(handoff);
@@ -211,6 +219,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       if (!destination) return fail(res, 400, "DESTINATION_REQUIRED", "The destination assistant is required", origin);
       if (destination !== handoff.destination) return fail(res, 403, "DESTINATION_MISMATCH", "This package was approved for a different destination", origin);
       if (handoff.status !== "approved" && handoff.status !== "loaded") return fail(res, 409, "HANDOFF_NOT_APPROVED", "This context is not available until the handoff is approved", origin);
+      if (!(await snapshotIsCurrent(handoff))) return fail(res, 409, "REPOSITORY_CHANGED", "Repository state changed after this handoff was prepared; create and review a new draft", origin);
       return json(res, 200, { handoff, items: memoryByIds(handoff.projectId, handoff.memoryItemIds) }, origin);
     }
   }
@@ -220,11 +229,23 @@ async function route(req: IncomingMessage, res: ServerResponse) {
 function memoryByIds(projectId: string, ids: string[]): MemoryItem[] {
   return ids.map((id) => db.prepare("SELECT * FROM memory_items WHERE id=? AND project_id=?").get(id,projectId)).filter(Boolean).map((r: any) => memoryFrom(r));
 }
+async function snapshotIsCurrent(handoff: Handoff): Promise<boolean> {
+  const snapshot = handoff.evidence.find((entry) => entry.kind === "git-status" && entry.description.startsWith("Repository snapshot:"));
+  if (!snapshot) return true;
+  const current = (await getGitState(loadProject(handoff.projectId).rootPath))[0];
+  return current.description === snapshot.description;
+}
 async function getGitState(root: string): Promise<Evidence[]> {
   const observedAt = new Date().toISOString();
   try {
-    const { stdout } = await exec("git", ["-C",root,"status","--short","--branch"], { timeout: 5000, windowsHide: true, maxBuffer: 200_000 });
-    return [{ kind: "git-status", status: "verified", description: `Observed Git state: ${stdout.trim() || "clean"}.`, observedAt, source: "repository" }];
+    const options = { timeout: 5000, windowsHide: true, maxBuffer: 5_000_000 };
+    const [status, head, diff] = await Promise.all([
+      exec("git", ["-C",root,"status","--short","--branch"], options),
+      exec("git", ["-C",root,"rev-parse","HEAD"], options),
+      exec("git", ["-C",root,"diff","--binary","HEAD"], options),
+    ]);
+    const fingerprint = createHash("sha256").update(head.stdout).update("\0").update(status.stdout).update("\0").update(diff.stdout).digest("hex").slice(0, 16);
+    return [{ kind: "git-status", status: "verified", description: `Repository snapshot: ${fingerprint}. Git HEAD, status, and tracked diff observed; untracked file contents are not checked.`, observedAt, source: "repository" }];
   } catch { return [{ kind: "git-status", status: "unverified", description: "Git state could not be read for this directory.", observedAt, source: "repository" }]; }
 }
 
