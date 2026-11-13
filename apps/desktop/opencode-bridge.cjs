@@ -14,8 +14,8 @@ async function freePort() {
 
 // The runtime MCP API is experimental. Fail closed if this OpenCode version
 // cannot connect; never silently claim that a package reached the assistant.
-async function startBridge({ executable, node, root, projectPath, handoffId, apiBase }) {
-  const port = await freePort();
+async function startBridge({ executable, node, root, projectPath, handoffId, apiBase, spawnProcess = spawn, fetchImpl = fetch, allocatePort = freePort }) {
+  const port = await allocatePort();
   const password = crypto.randomBytes(32).toString('hex');
   const base = `http://127.0.0.1:${port}`;
   // OpenCode's V2 API routes MCP configuration by working directory. Be
@@ -23,25 +23,39 @@ async function startBridge({ executable, node, root, projectPath, handoffId, api
   // the desktop launches, even if the server's default location differs.
   const location = `?location[directory]=${encodeURIComponent(projectPath)}`;
   const authorization = `Basic ${Buffer.from(`opencode:${password}`).toString('base64')}`;
-  const child = spawn(executable, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
+  const child = spawnProcess(executable, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
     cwd: projectPath, env: { ...process.env, OPENCODE_PASSWORD: password }, windowsHide: true, stdio: 'ignore',
   });
   let exited = false;
   child.on('error', () => { exited = true; });
   child.on('exit', () => { exited = true; });
-  const request = (route, options = {}) => fetch(`${base}${route}`, {
+  const stop = () => new Promise(resolve => {
+    if (exited || child.exitCode !== null && child.exitCode !== undefined) return resolve();
+    const timer = setTimeout(resolve, 1500);
+    child.once('exit', () => { clearTimeout(timer); resolve(); });
+    child.kill();
+  });
+  const request = (route, options = {}) => fetchImpl(`${base}${route}`, {
     ...options, headers: { authorization, ...(options.headers || {}) }, signal: AbortSignal.timeout(2500),
   });
   try {
     let ready = false;
     for (let i = 0; i < 80 && !exited; i++) {
-      try { const response = await request('/api/location'); if (response.ok) { ready = true; break; } } catch { /* startup */ }
+      // OpenCode v2 exposes server readiness at /api/info. The older
+      // /api/location route is not a health endpoint and may not exist across
+      // current releases, which otherwise leaves the child server running
+      // while Relay incorrectly reports startup failure.
+      try { const response = await request('/api/info'); if (response.ok) { ready = true; break; } } catch { /* startup */ }
       await pause(250);
     }
     if (!ready) throw new Error('Could not start the authenticated OpenCode service.');
     const result = await request(`/api/experimental/mcp/relay-desktop-handoff${location}`, {
       method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ config: { type: 'local', command: [node, path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'), path.join(root, 'apps', 'mcp', 'src', 'index.ts')], environment: { RELAY_API_URL: apiBase, RELAY_SCOPED_HANDOFF_ID: handoffId } } }),
+      // OpenCode v2.3 defaults MCP servers to Code Mode, which hides their
+      // individual tools behind `execute`. Relay's handoff is a single
+      // approval-scoped action; expose it natively so the destination model
+      // can discover and invoke it as a normal tool.
+      body: JSON.stringify({ config: { type: 'local', codemode: false, command: [node, path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'), path.join(root, 'apps', 'mcp', 'src', 'index.ts')], environment: { RELAY_API_URL: apiBase, RELAY_SCOPED_HANDOFF_ID: handoffId } } }),
     });
     if (!result.ok) throw new Error(`OpenCode could not register the handoff MCP (HTTP ${result.status}).`);
     let connected = false;
@@ -55,9 +69,9 @@ async function startBridge({ executable, node, root, projectPath, handoffId, api
       await pause(500);
     }
     if (!connected) throw new Error('OpenCode did not connect to the handoff MCP in time.');
-    return { base, password, stop: () => { if (!exited) child.kill(); } };
+    return { base, password, stop };
   } catch (error) {
-    if (!exited) child.kill();
+    await stop();
     throw error;
   }
 }

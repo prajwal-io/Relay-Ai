@@ -11,6 +11,9 @@ const API = "/api/v1";
 const exec = promisify(execFile);
 const PORT = Number(process.env.PORT ?? 4317);
 const HOST = process.env.HOST ?? "127.0.0.1";
+if (!["127.0.0.1", "localhost", "::1"].includes(HOST)) {
+  throw new Error("Relay API must bind to loopback. Remote binding is not supported by the local-first service.");
+}
 const allowedOrigins = new Set(
   ["http://localhost:5173", "http://127.0.0.1:5173", process.env.WEB_ORIGIN, ...(process.env.WEB_ORIGINS ?? "").split(",")]
     .flatMap((value) => {
@@ -38,6 +41,10 @@ function json(res: ServerResponse, status: number, payload: unknown, origin?: st
 function fail(res: ServerResponse, status: number, code: string, message: string, origin?: string | null, details?: unknown) {
   json(res, status, { error: { code, message, ...(details === undefined ? {} : { details }) } }, origin);
 }
+
+const rateBuckets = new Map<string, { start: number; count: number }>();
+const RATE_WINDOW_MS = 60_000;
+const RATE_LIMIT = 240;
 
 async function body(req: IncomingMessage): Promise<any> {
   let raw = "";
@@ -108,6 +115,24 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, { "access-control-allow-origin": origin && allowedOrigins.has(origin) ? origin : "null", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type", "access-control-max-age": "600", vary: "Origin" });
     return res.end();
+  }
+  if (req.method === "POST" && !/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] ?? "")) {
+    return fail(res, 415, "JSON_REQUIRED", "POST requests must use application/json", origin);
+  }
+  if (!req.method || !["GET", "POST"].includes(req.method)) {
+    res.setHeader("allow", "GET, POST, OPTIONS");
+    return fail(res, 405, "METHOD_NOT_ALLOWED", "This method is not supported by the Relay API", origin);
+  }
+  const now = Date.now();
+  const client = req.socket.remoteAddress ?? "unknown";
+  let bucket = rateBuckets.get(client);
+  if (!bucket || now - bucket.start >= RATE_WINDOW_MS) bucket = { start: now, count: 0 };
+  bucket.count++;
+  rateBuckets.set(client, bucket);
+  if (rateBuckets.size > 256) for (const [key, value] of rateBuckets) if (now - value.start >= RATE_WINDOW_MS) rateBuckets.delete(key);
+  if (bucket.count > RATE_LIMIT) {
+    res.setHeader("retry-after", String(Math.max(1, Math.ceil((RATE_WINDOW_MS - (now - bucket.start)) / 1000))));
+    return fail(res, 429, "RATE_LIMITED", "Too many requests to the local Relay service", origin);
   }
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
     if (req.method === "GET" && url.pathname === `${API}/health`) return json(res, 200, { ok: true, version: "0.1.0", intelligenceProvider: configuredExtractionProvider() }, origin);
@@ -219,28 +244,48 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       if (data.destination !== handoff.destination) return fail(res, 403, "DESTINATION_MISMATCH", "This package was approved for a different destination", origin);
       if (handoff.status !== "approved" && handoff.status !== "loaded") return fail(res, 409, "HANDOFF_NOT_APPROVED", "Approve the handoff before loading it into a destination", origin);
       if (!(await snapshotIsCurrent(handoff))) return fail(res, 409, "REPOSITORY_CHANGED", "Repository state changed after this handoff was prepared; create and review a new draft", origin);
-      if (handoff.status === "approved") {
-        handoff = { ...handoff, status: "loaded", loadedAt: new Date().toISOString() };
-        updateHandoff(handoff);
-      }
       // This is a receipt for an approved retrieval endpoint call only. It is
       // not evidence that a destination model read or understood the result.
       const retrievedAt = new Date().toISOString();
       const snapshot = handoff.evidence.find((entry) => entry.kind === "git-status" && entry.description.startsWith("Repository snapshot:"))?.description;
-      db.prepare("INSERT INTO handoff_receipts (id,handoff_id,destination,approved_item_ids_json,repository_snapshot,evidence_json,retrieved_at) VALUES (?,?,?,?,?,?,?)")
-        .run(randomUUID(), handoff.id, data.destination, JSON.stringify(handoff.memoryItemIds), snapshot ?? null, JSON.stringify(handoff.evidence), retrievedAt);
-      return json(res, 200, { handoff, items: memoryByIds(handoff.projectId, handoff.memoryItemIds) }, origin);
+      const approvedItems = memoryByIds(handoff.projectId, handoff.memoryItemIds);
+      const updatedHandoff = handoff.status === "approved" ? { ...handoff, status: "loaded" as const, loadedAt: retrievedAt } : handoff;
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        updateHandoff(updatedHandoff);
+        db.prepare("INSERT INTO handoff_receipts (id,handoff_id,destination,approved_item_ids_json,approved_context_json,repository_snapshot,evidence_json,retrieved_at) VALUES (?,?,?,?,?,?,?,?)")
+          .run(randomUUID(), handoff.id, data.destination, JSON.stringify(handoff.memoryItemIds), JSON.stringify(approvedItems), snapshot ?? null, JSON.stringify(handoff.evidence), retrievedAt);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+      return json(res, 200, { handoff: updatedHandoff, items: approvedItems }, origin);
     }
     if (path.length === 3 && path[2] === "receipt" && method === "GET") {
       const rows = db.prepare("SELECT * FROM handoff_receipts WHERE handoff_id=? ORDER BY retrieved_at ASC, rowid ASC").all(handoff.id) as any[];
       const retrievals: HandoffReceiptEntry[] = rows.map((row) => ({
         id: row.id, destination: row.destination, approvedItemIds: JSON.parse(row.approved_item_ids_json),
+        approvedItems: JSON.parse(row.approved_context_json ?? "[]"),
         ...(row.repository_snapshot ? { repositorySnapshot: row.repository_snapshot } : {}),
         evidence: JSON.parse(row.evidence_json), retrievedAt: row.retrieved_at,
       }));
       const latest = retrievals.at(-1);
-      if (!latest) return json(res, 200, { handoffId: handoff.id, destination: handoff.destination, approvedItemIds: handoff.memoryItemIds, ...(handoff.evidence.find((entry) => entry.kind === "git-status" && entry.description.startsWith("Repository snapshot:")) ? { repositorySnapshot: handoff.evidence.find((entry) => entry.kind === "git-status" && entry.description.startsWith("Repository snapshot:"))!.description } : {}), evidence: handoff.evidence, retrievedAt: null, retrievalCount: 0, retrievals: [] }, origin);
-      const receipt: HandoffReceipt = { handoffId: handoff.id, destination: latest.destination, approvedItemIds: latest.approvedItemIds, ...(latest.repositorySnapshot ? { repositorySnapshot: latest.repositorySnapshot } : {}), evidence: latest.evidence, retrievedAt: latest.retrievedAt, retrievalCount: retrievals.length, retrievals };
+      const evidence = latest?.evidence ?? handoff.evidence;
+      const repositoryStatus = await getReceiptRepositoryStatus(handoff);
+      const receipt: HandoffReceipt = {
+        handoffId: handoff.id,
+        destination: latest?.destination ?? handoff.destination,
+        approvedItemIds: latest?.approvedItemIds ?? handoff.memoryItemIds,
+        approvedItems: latest?.approvedItems ?? [],
+        repositoryStatus,
+        conflicts: evidence.filter((entry) => entry.status === "conflict").map((entry) => entry.description),
+        ...(latest?.repositorySnapshot ? { repositorySnapshot: latest.repositorySnapshot } : {}),
+        evidence,
+        ...(latest ? { retrievedAt: latest.retrievedAt } : { retrievedAt: null }),
+        retrievalCount: retrievals.length,
+        retrievals,
+      };
       return json(res, 200, receipt, origin);
     }
     if (path.length === 3 && path[2] === "context" && method === "GET") {
@@ -263,6 +308,15 @@ async function snapshotIsCurrent(handoff: Handoff): Promise<boolean> {
   if (!snapshot) return true;
   const current = (await getGitState(loadProject(handoff.projectId).rootPath))[0];
   return current.description === snapshot.description;
+}
+async function getReceiptRepositoryStatus(handoff: Handoff): Promise<HandoffReceipt["repositoryStatus"]> {
+  const snapshot = handoff.evidence.find((entry) => entry.kind === "git-status" && entry.description.startsWith("Repository snapshot:"));
+  if (!snapshot) return "unverified";
+  try {
+    const current = (await getGitState(loadProject(handoff.projectId).rootPath))[0];
+    if (current.status !== "verified") return "unavailable";
+    return current.description === snapshot.description ? "current" : "stale";
+  } catch { return "unavailable"; }
 }
 async function getGitState(root: string): Promise<Evidence[]> {
   const observedAt = new Date().toISOString();

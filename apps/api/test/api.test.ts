@@ -8,6 +8,7 @@ import { once } from "node:events";
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { request as httpRequest } from "node:http";
+import { DatabaseSync } from "node:sqlite";
 
 const port = 44317 + Math.floor(Math.random() * 1000);
 const base = `http://127.0.0.1:${port}/api/v1`;
@@ -61,6 +62,12 @@ test("local API rejects hostile Host and cross-site browser requests", async () 
   const crossSite = await fetch(`${base}/health`, { headers: { "sec-fetch-site": "cross-site" } });
   assert.equal(crossSite.status, 403);
   assert.equal((await crossSite.json() as any).error.code, "CROSS_SITE_REQUEST");
+  const unsupportedMethod = await fetch(`${base}/projects`, { method: "DELETE" });
+  assert.equal(unsupportedMethod.status, 405);
+  assert.equal(unsupportedMethod.headers.get("allow"), "GET, POST, OPTIONS");
+  const wrongContentType = await fetch(`${base}/projects`, { method: "POST", headers: { "content-type": "text/plain" }, body: "{}" });
+  assert.equal(wrongContentType.status, 415);
+  assert.equal((await wrongContentType.json() as any).error.code, "JSON_REQUIRED");
   assert.equal((await fetch(`${base}/health`)).status, 200, "local desktop and MCP requests without browser metadata remain usable");
 });
 
@@ -87,6 +94,14 @@ test("SQLite project and memory persistence plus approved destination handoff fl
 
   const approved = await post(`${base}/handoffs/${handoff.id}/approve`, { includeItemIds: [item.id] });
   assert.equal(approved.status, 200);
+  const directDb = new DatabaseSync(join(temp, "relay.sqlite"));
+  directDb.exec("CREATE TRIGGER fail_receipt_insert BEFORE INSERT ON handoff_receipts BEGIN SELECT RAISE(FAIL, 'synthetic receipt storage failure'); END");
+  const failedLoad = await post(`${base}/handoffs/${handoff.id}/load`, { destination: "codex" });
+  assert.equal(failedLoad.status, 500, "a receipt storage failure is returned to the caller");
+  const afterFailedLoad = (await (await fetch(`${base}/projects/${project.id}/handoffs`)).json() as any[])[0];
+  assert.equal(afterFailedLoad.status, "approved", "loaded state and retrieval receipt are committed atomically");
+  directDb.exec("DROP TRIGGER fail_receipt_insert");
+  directDb.close();
   assert.equal((await post(`${base}/handoffs/${handoff.id}/load`, { destination: "opencode" })).status, 403);
   const loaded = await post(`${base}/handoffs/${handoff.id}/load`, { destination: "codex" });
   assert.equal(loaded.status, 200);
@@ -100,8 +115,11 @@ test("SQLite project and memory persistence plus approved destination handoff fl
   assert.equal(receipt.handoffId, handoff.id);
   assert.equal(receipt.destination, "codex");
   assert.deepEqual(receipt.approvedItemIds, [item.id]);
+  assert.equal(receipt.approvedItems[0].content, "Finish the login redirect", "receipt retains the exact approved context returned at retrieval time");
+  assert.equal(receipt.repositoryStatus, "unverified", "non-git folders are never labeled verified");
   assert.equal(receipt.retrievalCount, 2, "each successful retrieval endpoint call gets a receipt");
   assert.equal(receipt.retrievals.length, 2);
+  assert.equal(receipt.retrievals[0].approvedItems[0].id, item.id);
   assert.ok(receipt.retrievals.every((entry: any) => entry.retrievedAt && entry.destination === "codex"));
   assert.ok(Array.isArray(receipt.evidence));
   assert.equal((await fetch(`${base}/handoffs/${handoff.id}/context?destination=opencode`)).status, 403);
@@ -207,4 +225,7 @@ test("explicit handoff items stay project-scoped and tracked changes invalidate 
   await writeFile(join(root, "example.txt"), "changed after loading\n");
   assert.equal((await fetch(`${base}/handoffs/${freshDraft.id}/context?destination=opencode`)).status, 409);
   assert.equal((await post(`${base}/handoffs/${freshDraft.id}/load`, { destination: "opencode" })).status, 409);
+  const staleReceipt = await (await fetch(`${base}/handoffs/${freshDraft.id}/receipt`)).json() as any;
+  assert.equal(staleReceipt.repositoryStatus, "stale", "receipts surface repository drift after retrieval");
+  assert.equal(staleReceipt.approvedItems[0].content, item.content, "the receipt preserves the retrieved text even if the repository later changes");
 });

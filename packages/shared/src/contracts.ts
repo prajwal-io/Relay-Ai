@@ -67,6 +67,7 @@ export interface HandoffReceiptEntry {
   id: string;
   destination: AgentKind;
   approvedItemIds: string[];
+  approvedItems: MemoryItem[];
   repositorySnapshot?: string;
   evidence: Evidence[];
   retrievedAt: string;
@@ -76,9 +77,12 @@ export interface HandoffReceipt {
   handoffId: string;
   destination: AgentKind;
   approvedItemIds: string[];
+  approvedItems: MemoryItem[];
+  repositoryStatus: "current" | "stale" | "unverified" | "unavailable";
+  conflicts: string[];
   repositorySnapshot?: string;
   evidence: Evidence[];
-  retrievedAt?: string;
+  retrievedAt: string | null;
   retrievalCount: number;
   retrievals: HandoffReceiptEntry[];
 }

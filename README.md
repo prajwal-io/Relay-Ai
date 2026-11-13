@@ -26,6 +26,8 @@ The dashboard is a Vite/React application. The local Node.js/TypeScript API owns
 
 The desktop handoff starts a password-protected OpenCode service on loopback and registers an MCP tool scoped to the approved handoff. Relay reports a package as loaded when the destination calls the retrieval endpoint; that confirms retrieval, not that a model understood the context. OpenCode's runtime MCP API is experimental, so the desktop flow checks the connection and reports failures.
 
+After a successful retrieval, Relay keeps a local Proof-of-Continuity receipt with the exact approved context snapshot, retrieval time, repository evidence, and a current/stale status. Download a Markdown copy from Handoff Studio to share it manually with teammates. This is a local share artifact; Relay does not yet synchronize receipts between users.
+
 ## Real-time use cases
 
 ### Continue a Codex chat in OpenCode
@@ -84,7 +86,7 @@ Tests cover API persistence and handoff state, MCP protocol and scoped handoff r
 
 The frontend can be deployed to Vercel; see [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md). The API, SQLite memory, repository checks, and MCP service remain on the developer's machine. A hosted page can use the local API only from the same computer while Relay is running. Keep the API bound to loopback and configure `WEB_ORIGINS` for the expected browser origin.
 
-This repository is an individual local-first MVP. Windows and macOS terminal launch paths are supported in source, but signed installers are not yet packaged. Browser origin, host, and cross-site request checks reduce web-based attacks, but the local API does not authenticate other local processes. The desktop-to-OpenCode model-session retrieval test still fails because the model is not offered Relay's connected tool. OpenCode's runtime MCP endpoint is experimental. There is no native mobile app.
+This repository is an individual local-first desktop MVP. Windows and macOS launch paths are implemented in source; Linux terminal launch is experimental. Signed installers and native packaging are not included yet. Browser origin, host, cross-site, method, content-type, and rate checks reduce web-based attacks, but the local API does not authenticate other processes running as the same user. A synthetic OpenCode v2.3.0 end-to-end check confirms the Relay tool is offered to a mock provider and retrieves the approved package once. It does not validate a real model/provider session or a macOS runtime. OpenCode's runtime MCP endpoint is experimental.
 
 ## Trust and privacy
 
