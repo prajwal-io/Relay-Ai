@@ -2,96 +2,204 @@
 
 **Switch agents. Keep progress. Verify continuity.**
 
-Relay AI is a local-first context continuity tool for coding assistants. It keeps project memory on your computer, checks repository state, and prepares reviewable context packages when you move work between agents.
+Relay AI is a local-first context continuity engine for AI-assisted software development. It helps developers carry project decisions, completed work, open tasks, and repository evidence from one coding assistant to another—with a human review and approval step.
 
-## What you can do
+## The problem
 
-- Keep tasks, decisions, file references, and unresolved issues in a project memory backed by local SQLite.
-- Extract candidate memory from notes with the configured AI provider, with a local fallback when the provider is unavailable. Review and save extracted items yourself.
-- Inspect Git status and selected repository evidence before approving a handoff. Relay distinguishes repository observations from claims made in chat.
-- Create a handoff draft, choose which memory to include, and explicitly approve it before the destination can retrieve the package.
-- Use the desktop companion on Windows or macOS to choose a Codex chat, review and edit its text, and prepare a Codex-to-OpenCode handoff.
+Coding assistants keep useful context inside separate chats and tools. When a developer changes agents, starts a new session, or asks a teammate to continue, they often have to reconstruct what was done, which files changed, why decisions were made, and what remains unfinished. A copied summary can be incomplete or stale, and it rarely shows which statements came from the repository versus a chat.
+
+Relay gives project context a durable, inspectable record. It preserves provenance, checks selected facts against the local repository, asks the developer to approve a handoff, and records when the destination retrieves the approved package.
+
+## What Relay does differently
+
+Relay is designed around **verified continuity**, not a shared black-box memory:
+
+1. **Capture with provenance.** Tasks, decisions, issues, notes, and file references retain their source and status.
+2. **Check repository evidence.** Relay inspects the registered checkout and reports observations separately from assistant claims. Git success alone is never treated as proof that a task is complete.
+3. **Review and approve.** The developer chooses which context leaves the source session and which assistant may retrieve it.
+4. **Record retrieval.** The Proof-of-Continuity receipt snapshots the approved context, destination, retrieval time, and repository state.
+
+### USP: Proof-of-Continuity
+
+After an approved handoff is retrieved, Relay can show **what was approved, which destination retrieved it, when retrieval occurred, and what repository evidence accompanied it**. This makes the transfer auditable and helps surface stale or conflicting context.
+
+A receipt proves that Relay returned a particular package. It does **not** prove that the destination model understood the package, followed it, or completed the task. Repository observations also cannot prove every statement made in a chat.
+
+## Who can use it
+
+- Individual developers who switch between Codex and OpenCode.
+- Open-source maintainers who want a compact project memory across coding sessions.
+- Small engineering teams that need to inspect and manually share a handoff record.
+- Developers evaluating MCP-compatible assistants who want context transfer to remain explicit and reviewable.
+
+Relay is currently a single-user, laptop/desktop product. It has no team account system, shared cloud memory, billing, or native mobile app. Teams can share an exported Markdown receipt manually.
+
+## Real-world workflows
+
+### Continue a Codex chat in OpenCode
+
+Run the desktop companion, choose a Codex chat, review and edit its text, and prepare a draft. Relay saves the reviewed text as local project memory and collects available repository evidence. Inspect the package, approve it, and Relay opens OpenCode for that project. OpenCode connects to Relay's handoff-scoped MCP tool and retrieves the approved context. The dashboard and companion show the persisted handoff state.
+
+The companion omits tool output, model reasoning, and non-text attachments, and rejects oversized transcripts. It masks common credential patterns, but redaction is not exhaustive; inspect the selected text before approval. Context retrieved by an assistant may be sent to that assistant's configured model provider.
+
+### Keep project decisions available across sessions
+
+Save a technical decision or unfinished task in Context Explorer, or use the MCP memory tools from a connected assistant. Later sessions can retrieve relevant project context with its source and verification state attached.
+
+### Catch stale context before a switch
+
+Build a handoff draft, inspect its selected memory and repository evidence, and review any conflicts. If the tracked repository snapshot changes, Relay invalidates the draft so the developer can review a fresh package.
+
+### Share a transfer record
+
+After retrieval, inspect Proof-of-Continuity in Handoff Studio and download its Markdown receipt. Share it with a teammate using your normal workflow; Relay does not sync receipts between users.
+
+## Product and support status
+
+- **Web dashboard:** React and Vite interface for projects, context, handoff review, verification, receipts, and settings.
+- **Local API:** Node.js/TypeScript service bound to loopback at `127.0.0.1:4317` by default.
+- **Persistent store:** SQLite on the developer's machine. In source development the default file is `apps/api/data/relay.sqlite`; `RELAY_DB_PATH` can override it.
+- **Desktop companion:** Electron source-run app with a Windows/macOS-oriented Codex chat review and Codex-to-OpenCode workflow. Linux terminal launching is experimental.
+- **Assistant connections:** Codex and OpenCode have repository MCP configurations. Other MCP-compatible clients may be able to use the tools, but compatibility and handoff behavior must be validated per client.
+- **AI extraction:** Optional Groq context extraction runs from the local API. Local extraction remains available when the provider is not configured or fails. Coding assistants use their own model/provider for their sessions.
+- **Landing-page demo:** The animated marketing walkthrough is illustrative and labeled as simulated. It does not inspect a live repository or create a real handoff.
+
+The installed OpenCode integration test uses a local mock provider and synthetic context to verify tool discovery, invocation, and retrieval. It does not verify a live model/provider handoff or model comprehension. OpenCode's runtime MCP API is experimental.
 
 ## Architecture
 
 ```text
-Web dashboard ──HTTP──┐
-Windows companion ────┼──> Local TypeScript API ──> SQLite project memory
-Coding agents ──MCP───┘            │
-                                   └──> Git evidence from registered repositories
-                                        Optional server-side extraction provider
+ Web browser / static Vercel frontend
+                 │ HTTP (same computer)
+                 ▼
+       Local Relay API (Node.js + TypeScript) ───── Git inspection
+                 │
+                 ├── SQLite project memory, handoffs, receipts
+                 │
+                 ├── optional redacted extraction request ── Groq
+                 │
+                 └── MCP stdio server ◀──── Codex / OpenCode
+
+ Electron desktop companion ── local API + Codex app-server
+             │
+             └── approved, scoped handoff ── OpenCode MCP service on loopback
 ```
 
-The dashboard is a Vite/React application. The local Node.js/TypeScript API owns project and handoff state in SQLite and inspects registered repositories. The MCP service exposes project context and handoff tools to supported assistants. The Electron companion runs separately from the dashboard, reads selected Codex chats through the local Codex app-server, and asks for human review before saving the selected text into Relay memory. It can open OpenCode in a native terminal on Windows and macOS; Linux terminal launch remains an early path.
+The API owns project and handoff state, SQLite access, repository checks, and optional extraction. The MCP server is a local stdio client of the API; it does not access SQLite directly. The Electron companion is a separate process and can show local activity, review a selected Codex chat, and launch the destination workflow.
 
-The desktop handoff starts a password-protected OpenCode service on loopback and registers an MCP tool scoped to the approved handoff. Relay reports a package as loaded when the destination calls the retrieval endpoint; that confirms retrieval, not that a model understood the context. OpenCode's runtime MCP API is experimental, so the desktop flow checks the connection and reports failures.
+### Handoff lifecycle
 
-After a successful retrieval, Relay keeps a local Proof-of-Continuity receipt with the exact approved context snapshot, retrieval time, repository evidence, and a current/stale status. Download a Markdown copy from Handoff Studio to share it manually with teammates. This is a local share artifact; Relay does not yet synchronize receipts between users.
+```text
+Source session → reviewed draft → repository check → human approval
+              → destination retrieval → local retrieval receipt
+```
 
-## Real-time use cases
+Creating or approving a package does not mean it has been transferred. The destination must retrieve the approved package for its intended assistant. Relay records retrieval as the continuity boundary; it does not infer model understanding.
 
-### Continue a Codex chat in OpenCode
+## Storage, privacy, and security
 
-Open **Switch a Codex chat** in the desktop companion, select a chat, review and edit its user and assistant text, then prepare a draft. Relay stores the reviewed text as project memory and captures repository evidence. Inspect the included context and verification label, then approve. Relay opens OpenCode in that project's directory and prompts it to retrieve the approved package through its scoped MCP tool. The local dashboard and companion reflect handoff state as it changes.
+- Project memory, handoffs, and receipts are local SQLite data by default. They are not uploaded to Relay cloud because this MVP has no Relay cloud backend.
+- The API binds to loopback and applies host, origin, cross-site, method, content-type, and request-rate checks. These checks are not authentication between processes running as the same operating-system user.
+- The optional `GROQ_API_KEY` belongs in the local API environment. Never put it in a `VITE_` variable, frontend bundle, source control, or a handoff. Relay redacts common secret patterns before provider requests, but no redaction system is perfect.
+- When Groq extraction is used, requested text is sent to Groq after redaction. Without Groq, local extraction and basic handoffs continue to work.
+- An assistant may send retrieved context to its configured model provider. Review context and provider settings before use.
+- Repository evidence is limited to checks Relay actually performs. Tracked repository state is used to detect stale drafts; untracked file contents are not part of that snapshot.
 
-The companion excludes reasoning, tool output, and non-text attachments. It rejects oversized transcripts and masks common credential patterns, but redaction is incomplete; review the text before approval. Depending on OpenCode's configured provider, retrieved context may be sent to that provider.
+## Run from source
 
-### Keep project decisions available across sessions
+### Requirements
 
-Register a repository in the dashboard, save decisions and open tasks in Context Explorer, and retrieve relevant project memory from a connected assistant through MCP. Each item retains its source and verification status so an assistant can distinguish a user decision from a repository observation.
+- Node.js 22.9 or newer.
+- Git on `PATH` for repository verification.
+- OpenCode installed separately to use the Codex-to-OpenCode desktop handoff.
 
-### Review an unfinished task before switching agents
+### Start the dashboard and API
 
-Create a handoff from Handoff Studio, select the memory items the destination needs, check Git evidence and conflicts, and approve the draft. The destination can only retrieve an approved package for its intended assistant. If the tracked repository snapshot changes, Relay rejects approval or retrieval and asks you to review a fresh draft.
-
-## Run locally
-
-Requirements: Node.js 22.9+ and Git on `PATH` for repository checks.
+From the repository root:
 
 ```sh
 npm install
 npm run dev
 ```
 
-Open the Vite URL shown in the terminal (usually `http://127.0.0.1:5173`). The API listens on `127.0.0.1:4317`; SQLite is stored at `apps/api/data/relay.sqlite`. The web dev server proxies `/api/v1` to the local API.
+Open the URL printed by Vite (typically `http://127.0.0.1:5173`). The API listens on `http://127.0.0.1:4317`; the Vite development server proxies `/api/v1` to it. In the dashboard, choose **Add project** and register a local repository by its absolute path.
 
-To run the Windows desktop companion, use another terminal:
+### Start the desktop companion
+
+In a second terminal at the repository root:
 
 ```sh
 npm run desktop
 ```
 
-If the API is not already running, the companion starts it using `apps/api/.env` and the same local database. The window stays above other apps, can be dragged, and can be reopened from the tray. Windows startup registration and a packaged installer are not included.
+The companion uses the local API and the development SQLite database. See [apps/desktop/README.md](apps/desktop/README.md) for controls and platform notes. The repository currently documents source-run development; signed, production installers are not available from the main branch.
 
-To register a project, open **Launch dashboard → Add project** and enter its absolute path. The landing page's walkthrough is simulated and is not live repository evidence.
+### Optional Groq extraction
 
-## AI extraction
+Copy `apps/api/.env.example` to `apps/api/.env`, then set `GROQ_API_KEY` in that local file. Keep the key private and out of Git. `GROQ_MODEL` and `GROQ_TIMEOUT_MS` can be set there as well. The local fallback is used if no key is configured or the provider fails.
 
-Copy `apps/api/.env.example` to `apps/api/.env` and set `GROQ_API_KEY` to enable Groq extraction. Keep this key on the API process; do not put it in frontend configuration or commit it. Submitted text is redacted for common credential patterns before provider requests. Extraction proposes memory only; inspect and save the result in Relay. Without a key or when the provider fails, local fallback extraction remains available.
+### Connect Codex and OpenCode through MCP
 
-## Connect coding assistants
+Relay's MCP server communicates with the local API over stdio. Sample project configuration is included in `.codex/config.toml` and `opencode.json`; replace their sample absolute repository paths with the path on your computer, then reopen/reload the project in each client. For details and the global Codex CLI option, see [apps/mcp/README.md](apps/mcp/README.md).
 
-Start the local API and follow [the MCP setup guide](apps/mcp/README.md) to connect an assistant over stdio. Assistants retrieve project memory by calling Relay tools. Relay does not automatically capture every conversation or inject context into every session.
+To run the MCP server manually after starting the API:
 
-## Build and tests
+```sh
+npm run mcp --workspace @relay-ai/mcp
+```
+
+Relay exposes tools for listing projects, reading context, saving memory, creating and approving handoffs, loading approved context, retrieving handoff history, and checking repository state. MCP support does not automatically capture every conversation or silently inject context; the assistant must call Relay tools, and approval remains explicit.
+
+## Configuration
+
+Configuration is read by the local API from `apps/api/.env`:
+
+| Variable | Purpose | Default / note |
+|---|---|---|
+| `HOST` | API bind address | Loopback only (`127.0.0.1`) |
+| `PORT` | Local API port | `4317` |
+| `RELAY_DB_PATH` | SQLite file path | `./data/relay.sqlite` relative to the API working directory |
+| `WEB_ORIGIN` | Allowed browser origin | `http://localhost:5173` in the example |
+| `WEB_ORIGINS` | Additional exact browser origins | Comma-separated; avoid wildcards |
+| `GROQ_API_KEY` | Optional extraction credential | Keep only in the local API environment |
+| `GROQ_MODEL` | Extraction model | Example file provides a default |
+| `GROQ_TIMEOUT_MS` | Extraction timeout | Example file provides a default; local extraction is the fallback |
+
+Do not bind the local API to a public network interface. Only add a Vercel origin you control to `WEB_ORIGINS`; CORS is a browser boundary, not process authentication.
+
+## Build and test
 
 ```sh
 npm run build
 npm test
 ```
 
-`npm test` covers API persistence and handoff state, MCP protocol and scoped handoff retrieval, extraction behavior, desktop startup and chat redaction, and receipt export. Pull requests run the same tests and production build on Windows and macOS. The installed OpenCode end-to-end test uses a local mock provider and synthetic context; it does not prove that a live model understood a handoff.
+The workspace scripts build the API, web frontend, and MCP server. Tests cover API persistence and handoff rules, extraction and fallback, MCP protocol and scoped retrieval, desktop startup/chat handling, and receipt export.
 
-## Deployment and launch status
+## Deploying the web frontend
 
-The frontend can be deployed to Vercel; see [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md). The API, SQLite memory, repository checks, and MCP service remain on the developer's machine. A hosted page can use the local API only from the same computer while Relay is running. Keep the API bound to loopback and configure `WEB_ORIGINS` for the expected browser origin.
+The frontend can be deployed as a static Vite site on Vercel. The local API, SQLite store, Git inspection, and MCP server stay on the developer's machine. See [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md) before deployment.
 
-This is a laptop/desktop product for Windows and macOS; there is no native mobile client. The Linux terminal-launch path is experimental and is not a launch target yet. Windows and macOS launch paths are implemented in source, but macOS runtime validation and signed installers/native packaging remain outstanding. Browser origin, host, cross-site, method, content-type, and rate checks reduce web-based attacks, but the local API does not authenticate other processes running as the same user. An installed OpenCode v2.3.0 end-to-end test confirms the Relay tool is offered to a local mock provider, invoked, and retrieves one synthetic approved package. It does not validate a real model/provider session or a macOS runtime. OpenCode's runtime MCP endpoint is experimental.
+A hosted frontend only reaches a local Relay API when it is opened in a browser on the same computer as the running API and that exact frontend origin is allowed. Deploying the frontend does not create a shared or multi-user Relay service. Do not expose the loopback API publicly or place `GROQ_API_KEY` in Vercel frontend variables.
 
-## Trust and privacy
+## Repository map
 
-- Git checks report repository observations; they do not prove that a task or chat claim is correct.
-- Handoff drafts require explicit approval. The approved destination is checked when it retrieves the package.
-- Tracked repository snapshot changes invalidate a handoff. Untracked file contents are not part of that fingerprint.
-- Codex chat text is copied into Relay's local SQLite memory when you prepare a draft. Inspect selected text before approval.
-- Local storage stays on this computer unless you choose an AI provider or assistant provider that transmits the context you send it.
+```text
+apps/web/       Landing page and dashboard
+apps/api/       Local HTTP API, SQLite, Git checks, extraction
+apps/mcp/       MCP stdio server and assistant setup guide
+apps/desktop/   Electron desktop companion
+packages/shared/Shared TypeScript contracts
+```
+
+## Current limitations
+
+- Single-user local service; no sign-in, team workspace, cloud sync, shared database, or billing.
+- No native mobile client. Relay is aimed at Windows and macOS laptops/desktops; Linux terminal launching is experimental.
+- No signed or notarized production installer is currently provided from the main branch.
+- Desktop source includes the Codex-to-OpenCode workflow. A local mock-provider OpenCode test validates tool retrieval, but a live model/provider handoff remains unverified.
+- OpenCode's runtime MCP API is experimental.
+- Retrieval receipts prove package retrieval, not model comprehension or task completion.
+- The landing walkthrough is a clearly labeled simulation; actual workspace status comes from the local API.
+
+Relay is an open development project. Check the repository for the current license and release status before redistributing it.
