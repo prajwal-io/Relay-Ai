@@ -15,6 +15,12 @@ npm run dev
 
 Open the Vite URL shown in the terminal (normally `http://127.0.0.1:5173`). The API binds to `127.0.0.1:4317`; SQLite is stored at `apps/api/data/relay.sqlite`. The development server proxies `/api/v1` to the local service. Set `VITE_RELAY_API` when the browser and API need a different address.
 
+### Windows desktop companion
+
+To run Relay as a desktop tray companion outside the dashboard browser, start the API and web dashboard as above, then run `npm run desktop` in another terminal. The compact Relay companion stays above other windows, expands into a handoff view, and watches the local API for an approved package to be loaded. If the API is not already running, the desktop app starts it locally using `apps/api/.env` and the same SQLite database. Use the tray icon to reopen the companion or quit it. It does not yet install itself to Windows startup.
+
+The desktop companion can list local Codex chats, let you review text from a chosen chat, create a repository-checked draft, and open OpenCode after approval. Text-only transfer, redaction limits, local file retention, and launch limitations are described in [the desktop guide](apps/desktop/README.md).
+
 To register a project, open **Launch dashboard → Add project** and provide its absolute path. In **Context Explorer**, add or inspect tasks, decisions, files, and open issues. **Verification** reports current Git observations and repository file checks. **Handoff Studio** builds a draft, lets you select included memory, and requires approval before loading the package. The landing-page walkthrough is simulated and labeled; it is not evidence from a live repository.
 
 ## Optional Groq context extraction

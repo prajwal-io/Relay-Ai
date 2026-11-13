@@ -1,4 +1,4 @@
-import { access, realpath } from "node:fs/promises";
+import { access, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -11,9 +11,11 @@ export async function validateRootPath(input: unknown): Promise<string> {
     throw Object.assign(new Error("rootPath must be an absolute path"), { status: 400, code: "INVALID_ROOT" });
   }
   try {
-    return await realpath(input);
+    const resolved = await realpath(input);
+    if (!(await stat(resolved)).isDirectory()) throw new Error("Not a directory");
+    return resolved;
   } catch {
-    throw Object.assign(new Error("Project directory does not exist or is inaccessible"), { status: 400, code: "ROOT_NOT_FOUND" });
+    throw Object.assign(new Error("Project directory does not exist, is not a directory, or is inaccessible"), { status: 400, code: "ROOT_NOT_FOUND" });
   }
 }
 
@@ -49,6 +51,9 @@ export async function collectRepositoryEvidence(root: string, items: MemoryItem[
     evidence.push({ kind: "git-status", status: "unverified", description: "Git status could not be read.", observedAt, source: "repository" });
   }
   for (const item of items) {
+    // A conversation transcript can contain examples, old filenames, and domains.
+    // Treating each of those as a current file claim creates false conflicts.
+    if (item.tags.includes("codex-chat")) continue;
     const pathMatches = item.content.match(/(?:^|\s)([\w@./\\-]+\.[a-zA-Z0-9]{1,8})(?=$|[\s:])/g) ?? [];
     for (const match of pathMatches.slice(0, 8)) {
       const path = match.trim().replace(/[\\]/g, "/").replace(/^\.\//, "");

@@ -1,0 +1,13 @@
+{
+  "name": "@relay-ai/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "desktop": "electron .",
+    "test": "node --test test/*.test.cjs"
+  },
+  "devDependencies": {
+    "electron": "^39.2.7"
+  }
+}
