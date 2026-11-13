@@ -87,10 +87,20 @@ test('installed OpenCode v2 exposes and calls Relay handoff tool with a local mo
     for (let attempt = 0; attempt < 80 && retrievals === 0; attempt++) await pause(250);
     assert.equal(offeredRelayTool, 'relay-desktop-handoff_relay_load_approved_handoff', 'OpenCode exposes Relay as a native provider tool');
     assert.equal(retrievals, 1, 'mock model called the tool and Relay served the package once');
-    if (providerCalls < 2) {
-      const messages = await call(`/api/session/${sessionId}/message`);
-      assert.ok(providerCalls >= 2, `mock model was not called with the tool result: ${JSON.stringify(messages.data).slice(0, 1500)}`);
+    let messages;
+    let toolPart;
+    const completionDeadline = Date.now() + 20_000;
+    while (Date.now() < completionDeadline) {
+      messages = await call(`/api/session/${sessionId}/message`);
+      toolPart = messages.data.flatMap(message => message.content ?? []).find(part => part.type === 'tool' && part.name === offeredRelayTool);
+      const resultText = toolPart?.state.content?.map(part => part.text ?? '').join('\n') ?? '';
+      if (providerCalls >= 2 && toolPart?.state.status === 'completed' && resultText.includes('Synthetic task: finish the blue button.')) break;
+      await pause(250);
     }
+    assert.ok(providerCalls >= 2, `mock model was not called with the tool result: ${JSON.stringify(messages?.data).slice(0, 1500)}`);
+    assert.ok(toolPart, `OpenCode message history contains the Relay tool: ${JSON.stringify(messages?.data).slice(0, 2000)}`);
+    assert.equal(toolPart.state.status, 'completed', `OpenCode recorded the MCP result: ${JSON.stringify(toolPart).slice(0, 1000)}`);
+    assert.match(toolPart.state.content?.map(part => part.text ?? '').join('\n') ?? '', /Synthetic task: finish the blue button/);
   } finally {
     if (bridge && sessionId) await fetch(`${bridge.base}/api/session/${sessionId}`, { method: 'DELETE', headers: { authorization: `Basic ${Buffer.from(`opencode:${bridge.password}`).toString('base64')}` } }).catch(() => {});
     await bridge?.stop();

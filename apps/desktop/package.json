@@ -8,6 +8,6 @@
     "test": "node --test test/*.test.cjs"
   },
   "devDependencies": {
-    "electron": "^39.2.7"
+    "electron": "^45.3.2"
   }
 }
