@@ -111,7 +111,7 @@ document.querySelector('#prepare-chat').addEventListener('click', async event =>
     }
     const conflicts = (result.evidence || []).some(item => item.status === 'conflict');
     document.querySelector('#evidence-meta').textContent = `${result.title} · ${result.verification} verification`;
-    document.querySelector('#evidence-note').textContent = conflicts ? 'Resolve the conflicts in the repository and prepare the handoff again.' : 'Repository observations do not verify every chat claim. Approval saves a local handoff file and opens OpenCode.';
+    document.querySelector('#evidence-note').textContent = conflicts ? 'Resolve the conflicts in the repository and prepare the handoff again.' : 'Repository observations do not verify every chat claim. Approval opens OpenCode, which may send this context to its configured model provider.';
     document.querySelector('#launch-opencode').disabled = conflicts;
     showStage('evidence-stage');
   } catch (error) { if (workflowOpen) status.textContent = errorMessage(error); }
