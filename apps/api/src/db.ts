@@ -31,4 +31,18 @@ db.exec(`
     memory_ids_json TEXT NOT NULL, evidence_json TEXT NOT NULL, verification TEXT NOT NULL,
     status TEXT NOT NULL, created_at TEXT NOT NULL, approved_at TEXT, loaded_at TEXT
   );
+  CREATE TABLE IF NOT EXISTS handoff_receipts (
+    id TEXT PRIMARY KEY, handoff_id TEXT NOT NULL REFERENCES handoffs(id) ON DELETE CASCADE,
+    destination TEXT NOT NULL, approved_item_ids_json TEXT NOT NULL,
+    approved_context_json TEXT NOT NULL DEFAULT '[]',
+    repository_snapshot TEXT, evidence_json TEXT NOT NULL, retrieved_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS handoff_receipts_history ON handoff_receipts(handoff_id, retrieved_at DESC);
 `);
+
+// Local databases created before the context snapshot field can be upgraded
+// in place without discarding existing retrieval receipts.
+const receiptColumns = db.prepare("PRAGMA table_info(handoff_receipts)").all() as { name: string }[];
+if (!receiptColumns.some((column) => column.name === "approved_context_json")) {
+  db.exec("ALTER TABLE handoff_receipts ADD COLUMN approved_context_json TEXT NOT NULL DEFAULT '[]'");
+}

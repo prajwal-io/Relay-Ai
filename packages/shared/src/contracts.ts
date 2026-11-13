@@ -62,6 +62,31 @@ export interface Handoff {
   loadedAt?: string;
 }
 
+/** Records calls to the approved-context retrieval endpoint; it does not claim model comprehension. */
+export interface HandoffReceiptEntry {
+  id: string;
+  destination: AgentKind;
+  approvedItemIds: string[];
+  approvedItems: MemoryItem[];
+  repositorySnapshot?: string;
+  evidence: Evidence[];
+  retrievedAt: string;
+}
+
+export interface HandoffReceipt {
+  handoffId: string;
+  destination: AgentKind;
+  approvedItemIds: string[];
+  approvedItems: MemoryItem[];
+  repositoryStatus: "current" | "stale" | "unverified" | "unavailable";
+  conflicts: string[];
+  repositorySnapshot?: string;
+  evidence: Evidence[];
+  retrievedAt: string | null;
+  retrievalCount: number;
+  retrievals: HandoffReceiptEntry[];
+}
+
 export interface ApiError {
   error: { code: string; message: string; details?: unknown };
 }
@@ -77,6 +102,7 @@ export interface ApiContract {
   "POST /projects/:projectId/handoffs": { body: { source: AgentKind; destination: AgentKind; title?: string; query?: string }; response: Handoff };
   "POST /handoffs/:handoffId/approve": { body?: { includeItemIds?: string[] }; response: Handoff };
   "POST /handoffs/:handoffId/load": { response: { handoff: Handoff; items: MemoryItem[] } };
+  "GET /handoffs/:handoffId/receipt": { response: HandoffReceipt };
   "GET /handoffs/:handoffId/context": { response: { handoff: Handoff; items: MemoryItem[] } };
   "GET /projects/:projectId/handoffs": { response: Handoff[] };
   "GET /projects/:projectId/verification": { response: { checkedAt: string; evidence: Evidence[]; conflicts: string[] } };

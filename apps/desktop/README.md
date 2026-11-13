@@ -1,6 +1,8 @@
 # Relay AI desktop companion
 
-The Electron companion runs as a separate Windows desktop process with a tray icon and a compact always-on-top widget. It polls Relay's loopback API for project and handoff state. When explicitly requested, it lists local Codex chats through Codex app-server and reads the selected chat for review.
+The Electron companion runs as a separate Windows or macOS desktop process with a tray icon and a compact always-on-top widget. It polls Relay's loopback API for project and handoff state. When explicitly requested, it lists local Codex chats through Codex app-server and reads the selected chat for review. Linux terminal launch remains experimental.
+
+When **Open dashboard** is selected, the companion checks the standard local Vite ports for a page titled Relay AI so a different app occupying port 5173 is not opened by mistake. Set `RELAY_DASHBOARD_URL` to an HTTPS deployment or an explicit loopback URL to override discovery.
 
 ## Run
 
@@ -11,7 +13,7 @@ npm install
 npm run desktop
 ```
 
-If `127.0.0.1:4317` is not already serving Relay, the companion starts the local API from `apps/api` and reads `apps/api/.env` there. Both the desktop app and dashboard use `apps/api/data/relay.sqlite` in development. The dashboard is still useful for reviewing and approving a package; the desktop app shows local activity and an arrival animation only after the API reports an approved-to-loaded state transition.
+If `127.0.0.1:4317` is not already serving Relay, the companion starts the local API from `apps/api` and reads `apps/api/.env` there. It verifies the Relay service identity before connecting, reports a clear startup message if Node.js is missing, and detects another service occupying the port. Both the desktop app and dashboard use `apps/api/data/relay.sqlite` in development. The dashboard is still useful for reviewing and approving a package; the desktop app shows local activity and an arrival animation only after the API reports an approved-to-loaded state transition.
 
 ## Controls and privacy
 
@@ -20,7 +22,7 @@ If `127.0.0.1:4317` is not already serving Relay, the companion starts the local
 - The animation is driven by persisted handoff status; it is not a simulated transfer.
 - The activity monitor receives handoff title, route, item count, and verification label. The chat review reads the selected conversation only after you choose it.
 - The API remains bound to loopback and the API key remains in the API process.
-- Windows startup registration and a packaged installer are not included yet.
+- Login startup registration and signed Windows/macOS installers are not included yet.
 
 ## Switch a Codex chat to OpenCode
 
