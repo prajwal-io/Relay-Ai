@@ -5,9 +5,14 @@
   "main": "main.cjs",
   "scripts": {
     "desktop": "electron .",
+    "package:stage": "node scripts/package-stage.cjs",
+    "package:windows": "electron-builder --win nsis --config electron-builder.yml",
+    "package:macos": "electron-builder --mac dmg --universal --config electron-builder.yml",
     "test": "node --test test/*.test.cjs"
   },
   "devDependencies": {
-    "electron": "^45.3.2"
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0",
+    "esbuild": "0.28.2"
   }
 }

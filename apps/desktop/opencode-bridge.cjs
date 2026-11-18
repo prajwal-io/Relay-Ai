@@ -14,7 +14,7 @@ async function freePort() {
 
 // The runtime MCP API is experimental. Fail closed if this OpenCode version
 // cannot connect; never silently claim that a package reached the assistant.
-async function startBridge({ executable, node, root, projectPath, handoffId, apiBase, spawnProcess = spawn, fetchImpl = fetch, allocatePort = freePort }) {
+async function startBridge({ executable, node, root, projectPath, handoffId, apiBase, accessToken, packaged = false, runtimePath = process.execPath, mcpEntry, spawnProcess = spawn, fetchImpl = fetch, allocatePort = freePort }) {
   const port = await allocatePort();
   const password = crypto.randomBytes(32).toString('hex');
   const base = `http://127.0.0.1:${port}`;
@@ -49,13 +49,19 @@ async function startBridge({ executable, node, root, projectPath, handoffId, api
       await pause(250);
     }
     if (!ready) throw new Error('Could not start the authenticated OpenCode service.');
+    const mcpCommand = packaged
+      ? [runtimePath, mcpEntry]
+      : [node, path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'), path.join(root, 'apps', 'mcp', 'src', 'index.ts')];
+    const environment = { RELAY_API_URL: apiBase, RELAY_SCOPED_HANDOFF_ID: handoffId };
+    if (accessToken) environment.RELAY_MCP_ACCESS_TOKEN = accessToken;
+    if (packaged) environment.ELECTRON_RUN_AS_NODE = '1';
     const result = await request(`/api/experimental/mcp/relay-desktop-handoff${location}`, {
       method: 'PUT', headers: { 'content-type': 'application/json' },
       // OpenCode v2.3 defaults MCP servers to Code Mode, which hides their
       // individual tools behind `execute`. Relay's handoff is a single
       // approval-scoped action; expose it natively so the destination model
       // can discover and invoke it as a normal tool.
-      body: JSON.stringify({ config: { type: 'local', codemode: false, command: [node, path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'), path.join(root, 'apps', 'mcp', 'src', 'index.ts')], environment: { RELAY_API_URL: apiBase, RELAY_SCOPED_HANDOFF_ID: handoffId } } }),
+      body: JSON.stringify({ config: { type: 'local', codemode: false, command: mcpCommand, environment } }),
     });
     if (!result.ok) throw new Error(`OpenCode could not register the handoff MCP (HTTP ${result.status}).`);
     let connected = false;

@@ -9,6 +9,14 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { request as httpRequest } from "node:http";
 import { DatabaseSync } from "node:sqlite";
+import { createHmac, randomBytes } from "node:crypto";
+
+const installationToken = randomBytes(32).toString("hex");
+const fetch = (url: string, init?: RequestInit) => {
+  const headers = new Headers(init?.headers);
+  if (!headers.has("authorization")) headers.set("authorization", `Bearer ${installationToken}`);
+  return globalThis.fetch(url, { ...init, headers });
+};
 
 const port = 44317 + Math.floor(Math.random() * 1000);
 const base = `http://127.0.0.1:${port}/api/v1`;
@@ -21,7 +29,7 @@ before(async () => {
   temp = await mkdtemp(join(tmpdir(), "relay-api-"));
   projectRoot = join(temp, "project");
   await mkdir(projectRoot);
-  const env = { ...process.env, PORT: String(port), HOST: "127.0.0.1", RELAY_DB_PATH: join(temp, "relay.sqlite"), GROQ_API_KEY: "" };
+  const env = { ...process.env, PORT: String(port), HOST: "127.0.0.1", RELAY_DB_PATH: join(temp, "relay.sqlite"), GROQ_API_KEY: "", RELAY_INSTALLATION_TOKEN: installationToken };
   child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], { cwd: resolve("."), env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   child.stdout?.on("data", (chunk) => { childError += String(chunk); });
   child.stderr?.on("data", (chunk) => { childError += String(chunk); });
@@ -45,6 +53,70 @@ after(async () => {
 });
 
 const post = async (url: string, data: unknown) => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+
+test("installation credentials and scoped handoff access are enforced", async () => {
+  assert.equal((await globalThis.fetch(`${base}/projects`)).status, 401);
+  const challenge = randomBytes(32).toString("hex");
+  const health = await globalThis.fetch(`${base}/health?challenge=${challenge}`);
+  assert.deepEqual(await health.json(), { proof: createHmac("sha256", installationToken).update(`health:${challenge}`).digest("hex") });
+  const root = join(temp, "scoped-project");
+  await mkdir(root);
+  const project = await (await post(`${base}/projects`, { name: "Scoped", rootPath: root })).json() as any;
+  const draft = await (await post(`${base}/projects/${project.id}/handoffs`, { source: "codex", destination: "opencode" })).json() as any;
+  const token = createHmac("sha256", installationToken).update(`load:${draft.id}`).digest("hex");
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const scoped = (path: string) => fetch(`${base}/handoffs/${path}`, { method: "POST", headers, body: '{"destination":"opencode"}' });
+  assert.equal((await fetch(`${base}/projects`, { headers })).status, 401);
+  assert.equal((await fetch(`${base}/activity`, { headers })).status, 401);
+  assert.equal((await scoped(`${draft.id}/approve`)).status, 401);
+  assert.equal((await fetch(`${base}/handoffs/${draft.id}`, { headers })).status, 401);
+  assert.equal((await (await fetch(`${base}/handoffs/${draft.id}`)).json() as any).status, "draft");
+  assert.equal((await scoped(`00000000-0000-4000-8000-000000000000/load`)).status, 401);
+  assert.equal((await scoped(`${draft.id}/load`)).status, 409);
+  assert.equal((await post(`${base}/handoffs/${draft.id}/approve`, {})).status, 200);
+  assert.equal((await scoped(`${draft.id}/load`)).status, 200);
+});
+
+test("activity is global, bounded, and promotes recently retrieved packages", async () => {
+  const fixtures = [];
+  for (let index = 0; index < 24; index++) {
+    const root = join(temp, `activity-${index}`);
+    await mkdir(root);
+    const project = await (await post(`${base}/projects`, { name: `Activity ${index}`, rootPath: root })).json() as any;
+    fixtures.push(await (await post(`${base}/projects/${project.id}/handoffs`, {
+      source: "codex", destination: "opencode", title: `Activity handoff ${index}`,
+    })).json() as any);
+  }
+  const oldest = fixtures[0];
+  const first = await (await fetch(`${base}/activity`)).json() as any;
+  assert.ok(first.projectCount >= 24);
+  assert.equal(first.handoffs.length, 20);
+  assert.equal(first.handoffs.some((handoff: any) => handoff.id === oldest.id), false);
+  assert.equal((await post(`${base}/handoffs/${oldest.id}/approve`, {})).status, 200);
+  assert.equal((await post(`${base}/handoffs/${oldest.id}/load`, { destination: "opencode" })).status, 200);
+  const recent = await (await fetch(`${base}/activity`)).json() as any;
+  assert.deepEqual(recent.handoffs[0], {
+    id: oldest.id, projectId: oldest.projectId, title: oldest.title, source: "codex", destination: "opencode",
+    status: "loaded", verification: oldest.verification, createdAt: oldest.createdAt, itemCount: 0,
+  });
+});
+
+test("SQLite backup and restore preserve project data", async () => {
+  const source = join(temp, "relay.sqlite");
+  const backup = join(temp, "backup.sqlite");
+  const restored = join(temp, "restored.sqlite");
+  const copy = (...args: string[]) => execFileSync(process.execPath, ["--import", "tsx", "src/database-copy.ts", ...args], { windowsHide: true, stdio: "pipe" });
+  copy(source, backup);
+  const placeholder = new DatabaseSync(restored);
+  placeholder.exec("CREATE TABLE placeholder (id INTEGER)");
+  placeholder.close();
+  copy(backup, restored, "--restore");
+  const db = new DatabaseSync(restored, { readOnly: true });
+  try {
+    assert.equal(db.prepare("SELECT name FROM projects WHERE name = 'Scoped'").get()?.name, "Scoped");
+    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 1);
+  } finally { db.close(); }
+});
 
 test("local API rejects hostile Host and cross-site browser requests", async () => {
   const hostileHost = await new Promise<{ status: number; body: string }>((resolve, reject) => {
@@ -136,7 +208,7 @@ test("MCP retrieves only an approved handoff for the intended destination", asyn
   const item = await (await post(`${base}/projects/${project.id}/memory`, { kind: "task", content: "Finish the synthetic redirect", source: "user" })).json() as any;
   const draft = await (await post(`${base}/projects/${project.id}/handoffs`, { source: "codex", destination: "opencode", memoryItemIds: [item.id] })).json() as any;
   const mcp = spawn(process.execPath, ["--import", "tsx", "../mcp/src/index.ts"], {
-    cwd: resolve("."), env: { ...process.env, RELAY_API_URL: base }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+    cwd: resolve("."), env: { ...process.env, RELAY_API_URL: base, RELAY_MCP_ACCESS_TOKEN: installationToken }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
   });
   let buffer = "";
   const replies = new Map<number, any>();
@@ -220,6 +292,12 @@ test("explicit handoff items stay project-scoped and tracked changes invalidate 
   const staleApproval = await post(`${base}/handoffs/${dirtyDraft.id}/approve`, { includeItemIds: [item.id] });
   assert.equal(staleApproval.status, 409);
   assert.equal((await staleApproval.json() as any).error.code, "REPOSITORY_CHANGED");
+
+  const newFile = join(root, "untracked.txt");
+  await writeFile(newFile, "alpha");
+  const untrackedDraft = await (await post(`${base}/projects/${project.id}/handoffs`, { source: "codex", destination: "opencode" })).json() as any;
+  await writeFile(newFile, "bravo");
+  assert.equal((await post(`${base}/handoffs/${untrackedDraft.id}/approve`, {})).status, 409);
 
   const freshDraft = await (await post(`${base}/projects/${project.id}/handoffs`, { source: "codex", destination: "opencode", memoryItemIds: [item.id] })).json() as any;
   assert.equal((await post(`${base}/handoffs/${freshDraft.id}/approve`, { includeItemIds: [item.id] })).status, 200);

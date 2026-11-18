@@ -1,14 +1,22 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const dbPath = resolve(process.env.RELAY_DB_PATH ?? "./data/relay.sqlite");
-mkdirSync(dirname(dbPath), { recursive: true });
+mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
 
+const existing = existsSync(dbPath);
 export const db = new DatabaseSync(dbPath);
+const version = Number(db.prepare("PRAGMA user_version").get()?.user_version);
+if (version > 1) throw new Error("This database was created by a newer version of Relay.");
+db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL");
+if (version === 0 && existing && db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").get()) {
+  db.prepare("VACUUM INTO ?").run(`${dbPath}.pre-v1-${randomUUID()}.sqlite`);
+}
+db.exec("BEGIN IMMEDIATE");
+try {
 db.exec(`
-  PRAGMA foreign_keys = ON;
-  PRAGMA journal_mode = WAL;
   CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, root_path TEXT NOT NULL UNIQUE,
     repository TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -45,4 +53,9 @@ db.exec(`
 const receiptColumns = db.prepare("PRAGMA table_info(handoff_receipts)").all() as { name: string }[];
 if (!receiptColumns.some((column) => column.name === "approved_context_json")) {
   db.exec("ALTER TABLE handoff_receipts ADD COLUMN approved_context_json TEXT NOT NULL DEFAULT '[]'");
+}
+db.exec("PRAGMA user_version = 1; COMMIT");
+} catch (error) {
+  db.exec("ROLLBACK");
+  throw error;
 }

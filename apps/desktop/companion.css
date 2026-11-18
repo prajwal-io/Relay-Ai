@@ -114,7 +114,7 @@ body { margin: 0; background: transparent; overflow: hidden; }
 .handoff-arrival .relay-core { animation: relay-confirm 440ms var(--ease-out) 250ms both; }
 @keyframes relay-confirm { 0% { transform: scale(1); } 55% { transform: scale(1.06); } 100% { transform: scale(1); } }
 
-.handoff-card { padding: 12px 13px 10px; border: 1px solid #e2e5e1; border-radius: 14px; background: #fff; box-shadow: 0 2px 7px rgba(23,27,36,.035); transition: border-color 180ms ease, background-color 180ms ease; }
+.handoff-card { padding: 13px 2px 10px; border-block: 1px solid var(--line); }
 .handoff-card-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .record-icon { width: 30px; height: 30px; flex: none; border: 1px solid #e3e7f2; border-radius: 9px; display: grid; place-items: center; background: #f4f6fb; color: #506cb9; }
 .record-icon svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
@@ -145,6 +145,10 @@ body { margin: 0; background: transparent; overflow: hidden; }
 .workflow-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid #e1e4e0; }
 .workflow-heading h1 { margin: 0; font-size: 25px; letter-spacing: -.035em; line-height: 1.1; }
 .workflow-heading p { max-width: 390px; margin: 8px 0 0; color: #68717d; font-size: 12px; line-height: 1.45; }
+.workflow-steps { flex: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; list-style: none; margin: 12px 0 0; padding: 0; }
+.workflow-steps li { padding-top: 6px; border-top: 2px solid var(--line); color: #58616d; font-size: 11px; line-height: 1.35; }
+.workflow-steps [aria-current="step"] { border-color: var(--blue); color: #2448cc; font-weight: 650; }
+.workflow-steps [data-complete] { border-color: #75ab9a; }
 .workflow-route { display: flex; align-items: center; flex: none; color: #315cf5; }
 .workflow-route b { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 9px; background: #eef2ff; font-size: 11px; }
 .workflow-route img, .launch-art img { width: 75%; height: 75%; object-fit: contain; }
@@ -157,6 +161,10 @@ body { margin: 0; background: transparent; overflow: hidden; }
 .stage-heading p { margin: 5px 0 0; color: #68717d; font-size: 11px; line-height: 1.4; }
 .chat-list, .evidence-list { overflow: auto; overscroll-behavior: contain; border-top: 1px solid #e1e4e0; }
 .chat-list { flex: 1; }
+.chat-search-label { font-size: 11px; font-weight: 650; margin: 0 0 5px; }
+#chat-search { width: 100%; min-height: 34px; padding: 6px 10px; margin: 0 0 10px; border: 1px solid #cbd1d2; border-radius: 7px; color: inherit; background: #fff; font: inherit; font-size: 12px; }
+#chat-search:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+#chat-search::placeholder { color: #5c6571; }
 .chat-row { width: 100%; display: flex; align-items: center; gap: 13px; padding: 13px 5px; text-align: left; background: transparent; border: 0; border-bottom: 1px solid #e1e4e0; cursor: pointer; color: #171b24; }
 .chat-row .chat-symbol { flex: none; display: grid; place-items: center; width: 34px; height: 34px; background: #ecefea; border-radius: 10px; font-size: 13px; font-weight: 700; }
 .chat-row .chat-copy { min-width: 0; display: grid; gap: 4px; flex: 1; }
@@ -178,8 +186,8 @@ body { margin: 0; background: transparent; overflow: hidden; }
 .launch-art span { width: 42px; height: 42px; display: grid; place-items: center; background: #eef1f7; border-radius: 13px; color: #222b3a; font-weight: 700; }
 .launch-art span.launch-relay { background: #315cf5; color: white; }
 .launch-art i { width: 52px; height: 1px; position: relative; background: #a8b8ee; }
-.launch-art i::after { content: ''; position: absolute; left: 0; top: -3px; width: 7px; height: 7px; border-radius: 2px; background: #315cf5; animation: travel-launch 900ms var(--ease-in-out) both; }
-.launch-art i:last-of-type::after { animation-delay: 450ms; }
+.retrieved .launch-art i { background: #76aa9b; }
+.retrieved .launch-art i:last-of-type::after { content: ''; position: absolute; left: 0; top: -3px; width: 7px; height: 7px; border-radius: 2px; background: var(--green); animation: travel-launch 560ms var(--ease-out) both; }
 @keyframes travel-launch { from { opacity: 0; transform: translateX(0); } 20% { opacity: 1; } to { opacity: 0; transform: translateX(48px); } }
 .chat-list::-webkit-scrollbar, .evidence-list::-webkit-scrollbar, #chat-context::-webkit-scrollbar { width: 6px; }
 .chat-list::-webkit-scrollbar-thumb, .evidence-list::-webkit-scrollbar-thumb, #chat-context::-webkit-scrollbar-thumb { background: #c4cbd1; border-radius: 6px; }
@@ -192,10 +200,10 @@ body { margin: 0; background: transparent; overflow: hidden; }
   .chat-row:hover { background: #f0f2f6; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .panel { transition: opacity 180ms ease-out, visibility 180ms; transform: none; }
+  .panel { transition: none; transform: none; }
   .handoff-arrival .packet { animation: packet-fade 180ms ease-out both; }
   @keyframes packet-fade { from { opacity: 0; } to { opacity: 1; } }
   .handoff-arrival .relay-core, .widget.arrival-pulse .capsule { animation: none; }
-  .launch-art i::after { animation: none; }
+  .retrieved .launch-art i:last-of-type::after { animation: none; display: none; }
   .capsule, .agent-icon { transition: none; }
 }
