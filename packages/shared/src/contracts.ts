@@ -23,10 +23,11 @@ export interface Session {
 }
 
 export interface Evidence {
-  kind: "git-status" | "git-diff" | "file-exists" | "file-content";
+  kind: "git-status" | "git-diff" | "file-exists" | "file-content" | "memory-claim";
   status: EvidenceStatus;
   description: string;
   path?: string;
+  memoryItemId?: string;
   observedAt: string;
   source: "repository" | "model" | "user";
 }

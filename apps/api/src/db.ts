@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const dbPath = resolve(process.env.RELAY_DB_PATH ?? "./data/relay.sqlite");
+export const dataDirectory = dirname(dbPath);
 mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
 
 const existing = existsSync(dbPath);

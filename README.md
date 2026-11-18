@@ -32,7 +32,7 @@ A receipt proves that Relay returned a particular package. It does **not** prove
 - Small engineering teams that need to inspect and manually share a handoff record.
 - Developers evaluating MCP-compatible assistants who want context transfer to remain explicit and reviewable.
 
-Relay is currently a single-user, laptop/desktop product. It has no team account system, shared cloud memory, billing, or native mobile app. Teams can share an exported Markdown receipt manually.
+Relay is a laptop/desktop product. Local SQLite remains the default. Optional Supabase email sign-in is used by the website's download flow; signed-in users can also save a one-way backup of project names, public repository links, and saved memory. Local folder paths and source files are not uploaded. Team workspaces and shared handoffs are not included.
 
 ## Real-world workflows
 
@@ -45,6 +45,10 @@ The companion omits tool output, model reasoning, and non-text attachments, and 
 ### Keep project decisions available across sessions
 
 Save a technical decision or unfinished task in Context Explorer, or use the MCP memory tools from a connected assistant. Later sessions can retrieve relevant project context with its source and verification state attached.
+
+### Add a repository in one step
+
+Paste a public GitHub or GitLab repository link. Relay downloads it into its local data folder, reads its README and tracked file list, and opens a short project overview. Private repositories are not supported by this import flow.
 
 ### Catch stale context before a switch
 
@@ -59,6 +63,7 @@ After retrieval, inspect Proof-of-Continuity in Handoff Studio and download its 
 - **Web dashboard:** React and Vite interface for projects, context, handoff review, verification, receipts, and settings.
 - **Local API:** Node.js/TypeScript service bound to loopback at `127.0.0.1:4317` by default.
 - **Persistent store:** SQLite on the developer's machine. In source development the default file is `apps/api/data/relay.sqlite`; `RELAY_DB_PATH` can override it.
+- **Optional account backup:** Supabase email sign-in and a per-user Postgres store protected by row-level security. Saving is user-triggered and excludes local folder paths and source files.
 - **Desktop companion:** Electron source-run app with a Windows/macOS-oriented Codex chat review and Codex-to-OpenCode workflow. Linux terminal launching is experimental.
 - **Assistant connections:** Codex and OpenCode have repository MCP configurations. Other MCP-compatible clients may be able to use the tools, but compatibility and handoff behavior must be validated per client.
 - **AI extraction:** Optional Groq context extraction runs from the local API. Local extraction remains available when the provider is not configured or fails. Coding assistants use their own model/provider for their sessions.
@@ -98,7 +103,7 @@ Creating or approving a package does not mean it has been transferred. The desti
 
 ## Storage, privacy, and security
 
-- Project memory, handoffs, and receipts are local SQLite data by default. They are not uploaded to Relay cloud because this MVP has no Relay cloud backend.
+- Project memory, handoffs, and receipts stay in local SQLite by default. Optional Supabase backup is user-triggered and uploads saved memory plus project names and public links; it excludes local folder paths and source files. Cloud restore and cross-device download are not included yet.
 - The API binds to loopback and applies host, origin, cross-site, method, content-type, and request-rate checks. These checks are not authentication between processes running as the same operating-system user.
 - The optional `GROQ_API_KEY` belongs in the local API environment. Never put it in a `VITE_` variable, frontend bundle, source control, or a handoff. Relay redacts common secret patterns before provider requests, but no redaction system is perfect.
 - When Groq extraction is used, requested text is sent to Groq after redaction. Without Groq, local extraction and basic handoffs continue to work.
@@ -126,7 +131,7 @@ npm install
 npm run dev
 ```
 
-`npm install` is the one-time dependency setup; `npm run dev` starts the frontend and backend together, so a second terminal or separate backend startup is not needed. Open the Vite URL printed in the terminal (typically `http://127.0.0.1:5173`). The local API listens on `http://127.0.0.1:4317`; the frontend proxies `/api/v1` requests to it. You can confirm the backend is responding at `http://127.0.0.1:4317/api/v1/health`. Then choose **Add project** in the dashboard and register a local repository by its absolute path.
+`npm install` is the one-time dependency setup; `npm run dev` starts the frontend and backend together, so a second terminal or separate backend startup is not needed. Open the Vite URL printed in the terminal (typically `http://127.0.0.1:5173`). The local API listens on `http://127.0.0.1:4317`; the frontend proxies `/api/v1` requests to it. You can confirm the backend is responding at `http://127.0.0.1:4317/api/v1/health`. Choose **Add project** to paste a public GitHub/GitLab link or register a local folder.
 
 To stop the local app, press `Ctrl+C` in the terminal running `npm run dev`. Your project memory remains in the local SQLite file after stopping and restarting the app.
 
@@ -143,6 +148,14 @@ The companion uses the local API and the development SQLite database. See [apps/
 ### Optional Groq extraction
 
 Copy `apps/api/.env.example` to `apps/api/.env`, then set `GROQ_API_KEY` in that local file. Keep the key private and out of Git. `GROQ_MODEL` and `GROQ_TIMEOUT_MS` can be set there as well. The local fallback is used if no key is configured or the provider fails.
+
+### Optional Supabase sign-in and account backup
+
+The Relay Supabase project has the tables and row-level security migrations applied. For another environment, apply both SQL files in [`supabase/migrations`](supabase/migrations). Copy `apps/web/.env.example` to `apps/web/.env.local`, then set the project URL and **publishable** key. Never put a Supabase secret/service-role key in a `VITE_` variable. Add your app's local URL, deployed site URL, and `relay-ai://auth/callback` to Supabase Auth's redirect allowlist. Rebuild the web app after changing these values.
+
+The public landing page uses email magic links for sign-in and account creation before opening the GitHub release page. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in the Vercel project build settings as well as local development. Add each site's exact URL to Supabase Auth's redirect allowlist. In the dashboard, choose **Settings → Account backup → Save to account** to upload saved memory and project names/links; local paths and source code stay on this computer. RLS limits rows to the signed-in user. This is a one-way backup; downloading cloud data to another installation is not implemented.
+
+The landing-page sign-in is a guided gate only: GitHub releases are public, so anyone with a direct release URL can bypass it. Enforced download access requires moving installer files to private storage and serving short-lived authenticated links.
 
 ### Connect Codex and OpenCode through MCP
 
@@ -173,6 +186,8 @@ Configuration is read by the local API from `apps/api/.env`:
 
 Keep the API bound to loopback. Use the installed dashboard from the tray or the local Vite dashboard during development.
 
+The optional frontend variables are documented in [`apps/web/.env.example`](apps/web/.env.example). The publishable key is intended for browser use; never use the secret/service-role key in the frontend.
+
 ## Build and test
 
 ```sh
@@ -202,7 +217,8 @@ packages/shared/Shared TypeScript contracts
 
 ## Current limitations
 
-- Single-user local service; no sign-in, team workspace, cloud sync, shared database, or billing.
+- The API and desktop app remain local-first. Supabase backup is optional and per-user; there are no team workspaces, shared handoff queues, or cloud restore yet.
+- Public GitHub/GitLab import only. Private repository authentication is not included yet.
 - No native mobile client. Relay is aimed at Windows and macOS laptops/desktops; Linux terminal launching is experimental.
 - This branch builds a Windows installer and prepares a signed macOS workflow. Public release requires clean-machine validation and signing credentials.
 - Desktop source includes the Codex-to-OpenCode workflow. A local mock-provider OpenCode test validates tool retrieval, but a live model/provider handoff remains unverified.

@@ -260,6 +260,35 @@ test("project registration rejects a missing path and extraction works without G
   assert.ok(result.items.length > 0);
 });
 
+test("contradictory Git claims are flagged and must be removed or resolved before approval", async () => {
+  const root = join(temp, "git-claim-project");
+  await mkdir(root);
+  execFileSync("git", ["init", root], { windowsHide: true, stdio: "ignore" });
+  const project = await (await post(`${base}/projects`, { name: "Git claim fixture", rootPath: root })).json() as any;
+  const item = await (await post(`${base}/projects/${project.id}/memory`, {
+    kind: "note", content: "Checkout is not a Git repository, so Git evidence is unverified.", source: "assistant",
+  })).json() as any;
+  const draft = await (await post(`${base}/projects/${project.id}/handoffs`, {
+    source: "codex", destination: "opencode", memoryItemIds: [item.id],
+  })).json() as any;
+  const db = new DatabaseSync(join(temp, "relay.sqlite"));
+  db.prepare("UPDATE handoffs SET evidence_json=?,verification=? WHERE id=?").run("[]", "unverified", draft.id);
+  db.close();
+  const reopened = await (await fetch(`${base}/handoffs/${draft.id}`)).json() as any;
+  assert.equal(reopened.verification, "conflict", "opening a saved draft refreshes current repository claims");
+  assert.ok(draft.evidence.some((entry: any) => entry.kind === "memory-claim" && entry.status === "conflict" && entry.memoryItemId === item.id));
+  const blocked = await post(`${base}/handoffs/${draft.id}/approve`, {});
+  assert.equal(blocked.status, 409);
+  assert.equal((await blocked.json() as any).error.code, "HANDOFF_CONFLICT");
+
+  const excluded = await post(`${base}/handoffs/${draft.id}/approve`, { includeItemIds: [] });
+  assert.equal(excluded.status, 200);
+  const approved = await excluded.json() as any;
+  assert.deepEqual(approved.memoryItemIds, []);
+  assert.doesNotMatch(approved.summary, /not a Git repository/i);
+  assert.equal(approved.verification, "unverified");
+});
+
 test("explicit handoff items stay project-scoped and tracked changes invalidate a draft", async () => {
   const root = join(temp, "git-project");
   await mkdir(root);

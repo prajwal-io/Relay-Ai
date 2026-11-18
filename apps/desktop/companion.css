@@ -19,14 +19,18 @@ body { margin: 0; background: transparent; overflow: hidden; }
 .widget { width: 100%; height: 100%; padding: 3px; }
 
 .capsule {
+  position: relative; isolation: isolate;
   width: 100%; height: 72px; padding: 10px 13px;
   display: flex; align-items: center; gap: 11px; text-align: left;
-  border: 1px solid rgba(225,228,224,.95); border-radius: 19px;
-  background: rgba(248,248,245,.98);
-  box-shadow: 0 12px 38px rgba(23,27,36,.17), 0 2px 5px rgba(23,27,36,.08);
-  color: inherit; cursor: pointer; -webkit-app-region: no-drag;
-  transition: border-color 160ms ease, box-shadow 160ms ease;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 27px;
+  background: linear-gradient(180deg, rgba(31,33,39,.98), rgba(12,13,17,.98));
+  box-shadow: 0 15px 42px rgba(8,10,15,.34), inset 0 1px rgba(255,255,255,.08);
+  color: #f6f7f8; cursor: pointer; -webkit-app-region: no-drag; backdrop-filter: blur(20px);
+  transition: border-color 180ms ease, box-shadow 220ms ease, background-color 180ms ease;
 }
+.capsule::before { content: ""; position: absolute; inset: -2px; z-index: -1; border-radius: inherit; background: linear-gradient(110deg, #315cf5 0%, #70a2ff 48%, #39a7c8 100%); filter: blur(11px); opacity: 0; transition: opacity 220ms ease; }
+.widget.connected .capsule::before { opacity: .24; }
+.widget.arrival-pulse .capsule::before { opacity: .78; }
 .capsule > * { pointer-events: none; }
 .capsule:focus-visible, .close:focus-visible, .dashboard-link:focus-visible {
   outline: 2px solid var(--blue); outline-offset: 2px;
@@ -37,21 +41,21 @@ body { margin: 0; background: transparent; overflow: hidden; }
 .move-grip:active { cursor: grabbing; }
 .relay-mark {
   width: 40px; height: 40px; flex: none; border-radius: 13px;
-  display: grid; place-items: center; background: #eef2ff; color: var(--blue);
-  box-shadow: inset 0 0 0 1px #dfe6ff;
+  display: grid; place-items: center; background: #202942; color: #8da8ff;
+  box-shadow: inset 0 0 0 1px #52608a;
 }
 .relay-mark svg { width: 27px; height: 27px; fill: currentColor; }
 .relay-mark .cut { fill: none; stroke: #f8f8f5; stroke-width: 2; }
 .capsule-copy { display: grid; gap: 4px; min-width: 0; }
 .capsule-copy strong { display: flex; align-items: center; gap: 7px; font-size: 14px; letter-spacing: -.025em; white-space: nowrap; }
 .capsule-agent { color: #89919c; font: 8px ui-monospace, Consolas, monospace; letter-spacing: .1em; }
-.capsule-copy small { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.capsule-copy small { display: flex; align-items: center; gap: 6px; color: #aeb4c0; font-size: 11px; white-space: nowrap; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #9aa1a9; display: inline-block; flex: none; }
 .status-dot.online { background: var(--green); box-shadow: 0 0 0 3px #20856819; }
 .capsule-route { display: none; }
 .capsule-route i { width: 13px; height: 1px; background: #c8ced8; }
 .capsule-route b { width: 19px; height: 19px; border-radius: 7px; display: grid; place-items: center; background: #315cf5; color: #fff; font-size: 10px; }
-.expand-glyph { margin-left: auto; color: #7d8590; font-size: 15px; }
+.expand-glyph { margin-left: auto; color: #b1b7c2; font-size: 15px; }
 
 .panel {
   position: absolute; inset: 3px; padding: 17px 19px 13px;
@@ -191,11 +195,11 @@ body { margin: 0; background: transparent; overflow: hidden; }
 @keyframes travel-launch { from { opacity: 0; transform: translateX(0); } 20% { opacity: 1; } to { opacity: 0; transform: translateX(48px); } }
 .chat-list::-webkit-scrollbar, .evidence-list::-webkit-scrollbar, #chat-context::-webkit-scrollbar { width: 6px; }
 .chat-list::-webkit-scrollbar-thumb, .evidence-list::-webkit-scrollbar-thumb, #chat-context::-webkit-scrollbar-thumb { background: #c4cbd1; border-radius: 6px; }
-.widget.arrival-pulse .capsule { animation: capsule-arrival 650ms var(--ease-out) both; }
-@keyframes capsule-arrival { 50% { border-color: #9cb0ff; box-shadow: 0 12px 38px rgba(23,27,36,.17), 0 0 0 4px #315cf51a; } }
+.widget.arrival-pulse .capsule { animation: capsule-arrival 720ms var(--ease-out) both; }
+@keyframes capsule-arrival { 45% { border-color: #7897ff; box-shadow: 0 15px 42px rgba(8,10,15,.34), 0 0 0 4px #315cf52b, 0 0 28px #315cf55c; } }
 
 @media (hover: hover) and (pointer: fine) {
-  .capsule:hover { border-color: #c6d0ff; box-shadow: 0 14px 40px rgba(23,27,36,.19), 0 0 0 3px #315cf50b; }
+  .capsule:hover { border-color: rgba(141,168,255,.68); box-shadow: 0 15px 42px rgba(8,10,15,.34), 0 0 0 3px #315cf51a; }
   .primary-action:not(:disabled):hover { background: #2448cc; }
   .chat-row:hover { background: #f0f2f6; }
 }
@@ -205,5 +209,6 @@ body { margin: 0; background: transparent; overflow: hidden; }
   @keyframes packet-fade { from { opacity: 0; } to { opacity: 1; } }
   .handoff-arrival .relay-core, .widget.arrival-pulse .capsule { animation: none; }
   .retrieved .launch-art i:last-of-type::after { animation: none; display: none; }
-  .capsule, .agent-icon { transition: none; }
+  .capsule, .capsule::before, .agent-icon { transition: none; }
+  .widget.arrival-pulse .capsule { animation: none; box-shadow: 0 15px 42px rgba(8,10,15,.34), 0 0 0 2px #315cf52b; }
 }

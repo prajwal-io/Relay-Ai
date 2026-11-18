@@ -1,6 +1,9 @@
 appId: ai.relay.desktop
 productName: Relay AI
 copyright: Copyright © 2026 Relay AI
+protocols:
+  - name: Relay AI sign-in
+    schemes: [relay-ai]
 directories:
   app: package-stage
   output: release
@@ -27,6 +30,10 @@ mac:
     - target: dmg
       arch: [universal]
   category: public.app-category.developer-tools
+  extendInfo:
+    CFBundleURLTypes:
+      - CFBundleURLName: Relay AI sign-in
+        CFBundleURLSchemes: [relay-ai]
   hardenedRuntime: true
   artifactName: Relay-AI-${version}-${arch}.${ext}
 dmg:

@@ -197,6 +197,18 @@ function setAgentIcon(id, name) {
   icon.innerHTML = iconMarkup[key];
 }
 
+function setAgentRoute(source, destination) {
+  const sourceName = prettyAgent(source);
+  const destinationName = prettyAgent(destination);
+  document.querySelector('#source-name').textContent = sourceName;
+  document.querySelector('#destination-name').textContent = destinationName;
+  document.querySelector('#source-state').textContent = `${sourceName.toUpperCase()} · SOURCE`;
+  document.querySelector('#destination-state').textContent = 'DESTINATION';
+  document.querySelector('#route').setAttribute('aria-label', `Handoff route from ${sourceName} through Relay to ${destinationName}`);
+  setAgentIcon('source-icon', sourceName);
+  setAgentIcon('destination-icon', destinationName);
+}
+
 function setStepState(status) {
   const steps = [...document.querySelectorAll('.step')];
   const progress = status === 'loaded' ? 3 : status === 'approved' ? 2 : status === 'draft' ? 1 : 0;
@@ -211,6 +223,7 @@ function setHandoff(handoff, isEvent) {
   const route = document.querySelector('#route');
   const stateChip = document.querySelector('#handoff-state');
   if (!handoff) {
+    setAgentRoute('codex', 'opencode');
     route.classList.remove('route--draft', 'route--approved', 'route--loaded', 'handoff-arrival');
     stateChip.textContent = 'STANDING BY';
     stateChip.className = 'handoff-state';
@@ -221,7 +234,6 @@ function setHandoff(handoff, isEvent) {
     document.querySelector('#item-count').textContent = '—';
     document.querySelector('#verified-mark').textContent = '?';
     document.querySelector('#verified-mark').className = 'verified';
-    document.querySelector('#destination-state').textContent = 'DESTINATION';
     setStepState('');
     return;
   }
@@ -230,10 +242,7 @@ function setHandoff(handoff, isEvent) {
   const verification = String(handoff.verification || '').toLowerCase();
   route.classList.remove('route--draft', 'route--approved', 'route--loaded');
   route.classList.add(`route--${status}`);
-  document.querySelector('#source-name').textContent = prettyAgent(handoff.source);
-  document.querySelector('#destination-name').textContent = prettyAgent(handoff.destination);
-  setAgentIcon('source-icon', handoff.source);
-  setAgentIcon('destination-icon', handoff.destination);
+  setAgentRoute(handoff.source, handoff.destination);
   document.querySelector('#handoff-title').textContent = handoff.title || 'Untitled handoff';
   const count = Number(handoff.itemCount) || 0;
   document.querySelector('#item-count').textContent = `${count} ${count === 1 ? 'ITEM' : 'ITEMS'}`;
@@ -242,7 +251,6 @@ function setHandoff(handoff, isEvent) {
   document.querySelector('#handoff-meta').textContent = `${statusLabel} · ${verificationLabel}`;
   document.querySelector('#panel-title').textContent = isEvent ? 'Handoff retrieved.' : status === 'loaded' ? 'Your last handoff was retrieved.' : status === 'approved' ? 'Approved and ready to move.' : 'A handoff is taking shape.';
   document.querySelector('#panel-subtitle').textContent = `${prettyAgent(handoff.source)} → Relay → ${prettyAgent(handoff.destination)}`;
-  document.querySelector('#source-state').textContent = `${prettyAgent(handoff.source).toUpperCase()} · SOURCE`;
   document.querySelector('#destination-state').textContent = status === 'loaded' ? 'CONTEXT RECEIVED' : 'DESTINATION';
   stateChip.textContent = `${status.toUpperCase()} · ${verification.toUpperCase() || 'UNVERIFIED'}`;
   stateChip.className = `handoff-state ${verification === 'partial' || verification === 'conflict' || verification === 'stale' ? 'verification-warn' : ''}`;
@@ -258,6 +266,7 @@ window.relayDesktop.onState(state => {
     expand(true);
   }
   const online = Boolean(state.online);
+  widget.classList.toggle('connected', online);
   document.querySelector('#status-dot').classList.toggle('online', online);
   document.querySelector('#panel-dot').classList.toggle('online', online);
   document.querySelector('#presence-label').textContent = online ? 'RELAY IS LISTENING LOCALLY' : 'LOCAL SERVICE DISCONNECTED';

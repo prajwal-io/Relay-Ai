@@ -41,8 +41,18 @@ export async function collectRepositoryEvidence(root: string, items: MemoryItem[
   try {
     insideRepo = (await git(root, ["rev-parse", "--show-toplevel"])).length > 0;
   } catch { /* a registered directory can be useful without Git */ }
+  for (const item of items) {
+    if (item.tags.includes("codex-chat")) continue;
+    const claimsNoGit = /\b(?:not\s+(?:a\s+)?git\s+(?:repository|repo)|no\s+git\s+(?:repository|repo)|git\s+(?:repository|repo)\s+(?:is\s+)?(?:missing|unavailable|not\s+present))\b/i.test(item.content);
+    const claimsGit = /\b(?:is|was|remains)\s+(?:a\s+)?git\s+(?:repository|repo)\b|\binside\s+(?:a\s+)?git\s+(?:repository|repo)\b/i.test(item.content);
+    if ((insideRepo && claimsNoGit) || (!insideRepo && claimsGit)) {
+      const description = `Saved context conflicts with the current repository check: it says ${insideRepo ? "this is not a Git repository" : "this is a Git repository"}.`;
+      evidence.push({ kind: "memory-claim", status: "conflict", description, memoryItemId: item.id, observedAt, source: "repository" });
+      conflicts.push(description);
+    }
+  }
   if (!insideRepo) {
-    return { evidence: [{ kind: "git-status", status: "unverified", description: "Directory is not a Git repository; repository state could not be checked.", observedAt, source: "repository" }], conflicts };
+    return { evidence: [{ kind: "git-status", status: "unverified", description: "Directory is not a Git repository; repository state could not be checked.", observedAt, source: "repository" }, ...evidence], conflicts };
   }
   try {
     const status = await git(root, ["status", "--short", "--branch"]);

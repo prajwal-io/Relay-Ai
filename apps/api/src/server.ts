@@ -1,12 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, readlink, realpath } from "node:fs/promises";
-import { dirname } from "node:path";
+import { lstat, mkdir, readlink, realpath, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { db } from "./db.js";
+import { dataDirectory, db } from "./db.js";
 import { collectRepositoryEvidence, resolveProjectFile, validateRootPath } from "./repository.js";
+import { cloneAndInspectRepository, parsePublicRepository } from "./repository-import.js";
 import type { AgentKind, Evidence, Handoff, HandoffReceipt, HandoffReceiptEntry, MemoryItem, MemoryKind, Project } from "../../../packages/shared/src/contracts.js";
 import { configuredExtractionProvider, extractContext } from "./intelligence.js";
 
@@ -184,6 +185,30 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     catch (e: any) { if (String(e.message).includes("UNIQUE")) return fail(res, 409, "PROJECT_EXISTS", "That directory is already registered", origin); throw e; }
     return json(res, 201, projectFrom(db.prepare("SELECT * FROM projects WHERE id=?").get(id) as any), origin);
   }
+  if (method === "POST" && path.length === 2 && path[0] === "projects" && path[1] === "import") {
+    const data = await body(req);
+    let source: { url: string; name: string };
+    try { source = parsePublicRepository(data.url); }
+    catch (error) { return fail(res, 400, "INVALID_REPOSITORY_URL", error instanceof Error ? error.message : "Paste a public GitHub or GitLab repository URL.", origin); }
+    const existing = db.prepare("SELECT * FROM projects WHERE repository=?").get(source.url) as any;
+    if (existing) return json(res, 200, { project: projectFrom(existing), alreadyAdded: true }, origin);
+    const destination = join(dataDirectory, "repositories", `${source.name.slice(0, 48)}-${randomUUID().slice(0, 8)}`);
+    await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+    let inspection: Awaited<ReturnType<typeof cloneAndInspectRepository>>;
+    try { inspection = await cloneAndInspectRepository(source.url, destination); }
+    catch (error) { return fail(res, 400, (error as any).code ?? "REPOSITORY_IMPORT_FAILED", error instanceof Error ? error.message : "Could not download this repository.", origin); }
+    try {
+      const rootPath = await validateRootPath(destination);
+      const now = new Date().toISOString();
+      const id = randomUUID();
+      db.prepare("INSERT INTO projects (id,name,root_path,repository,created_at,updated_at) VALUES (?,?,?,?,?,?)").run(id, source.name, rootPath, source.url, now, now);
+      return json(res, 201, { project: projectFrom(db.prepare("SELECT * FROM projects WHERE id=?").get(id) as any), inspection }, origin);
+    } catch (error) {
+      await rm(destination, { recursive: true, force: true }).catch(() => {});
+      if (String((error as any)?.message).includes("UNIQUE")) return fail(res, 409, "PROJECT_EXISTS", "That repository is already on this computer.", origin);
+      throw error;
+    }
+  }
   if (path[0] === "projects" && path[1] && path.length === 2 && method === "GET") return json(res, 200, loadProject(path[1]), origin);
   if (path[0] === "projects" && path[1] && path[2] === "memory") {
     loadProject(path[1]);
@@ -257,16 +282,38 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   }
   if (path[0] === "handoffs" && path[1]) {
     let handoff = loadHandoff(path[1]);
-    if (method === "GET" && path.length === 2) return json(res, 200, handoff, origin);
+    if (method === "GET" && path.length === 2) {
+      if (handoff.status === "draft") {
+        const project = loadProject(handoff.projectId);
+        const items = memoryByIds(project.id, handoff.memoryItemIds);
+        const [repo, gitState] = await Promise.all([collectRepositoryEvidence(project.rootPath, items), getGitState(project.rootPath)]);
+        const itemEvidence = repo.evidence.filter((entry) => entry.kind !== "git-status");
+        handoff = { ...handoff, evidence: [...gitState, ...itemEvidence], verification: repo.conflicts.length ? "conflict" : itemEvidence.some((entry) => entry.status === "verified") ? "partial" : "unverified" };
+        updateHandoff(handoff);
+      }
+      return json(res, 200, handoff, origin);
+    }
     if (path.length === 3 && path[2] === "approve" && method === "POST") {
       if (handoff.status !== "draft") return fail(res, 409, "INVALID_HANDOFF_STATE", "Only draft handoffs can be approved", origin);
       if (!(await snapshotIsCurrent(handoff))) return fail(res, 409, "REPOSITORY_CHANGED", "Repository state changed after this handoff was prepared; create and review a new draft", origin);
       const data = await body(req);
-      if (Array.isArray(data.includeItemIds)) {
-        const requested: string[] = [...new Set<string>(data.includeItemIds.filter((x: unknown): x is string => typeof x === "string"))];
-        if (requested.some((id: string) => !handoff.memoryItemIds.includes(id))) return fail(res, 400, "ITEM_NOT_IN_HANDOFF", "Approved items must come from this draft package", origin);
-        handoff = { ...handoff, memoryItemIds: requested };
-      }
+      const requested: string[] = Array.isArray(data.includeItemIds)
+        ? [...new Set<string>(data.includeItemIds.filter((x: unknown): x is string => typeof x === "string"))]
+        : handoff.memoryItemIds;
+      if (requested.some((id: string) => !handoff.memoryItemIds.includes(id))) return fail(res, 400, "ITEM_NOT_IN_HANDOFF", "Approved items must come from this draft package", origin);
+      const project = loadProject(handoff.projectId);
+      const selectedItems = memoryByIds(project.id, requested);
+      const [repo, gitState] = await Promise.all([collectRepositoryEvidence(project.rootPath, selectedItems), getGitState(project.rootPath)]);
+      if (repo.conflicts.length) return fail(res, 409, "HANDOFF_CONFLICT", "Remove or resolve the conflicting context before approval", origin, { conflicts: repo.conflicts });
+      const evidence = [...gitState, ...repo.evidence.filter((entry) => entry.kind !== "git-status")];
+      const itemEvidence = repo.evidence.filter((entry) => entry.kind !== "git-status");
+      handoff = {
+        ...handoff,
+        memoryItemIds: requested,
+        evidence,
+        verification: itemEvidence.some((entry) => entry.status === "verified") ? "partial" : "unverified",
+        summary: selectedItems.length ? selectedItems.slice(0, 6).map((item) => `• ${item.content}`).join("\n") : "No saved project context matched this handoff yet.",
+      };
       handoff = { ...handoff, status: "approved", approvedAt: new Date().toISOString() };
       const update = db.prepare("UPDATE handoffs SET memory_ids_json=?,status=?,approved_at=? WHERE id=? AND status='draft'")
         .run(JSON.stringify(handoff.memoryItemIds), handoff.status, handoff.approvedAt!, handoff.id);

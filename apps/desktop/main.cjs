@@ -22,6 +22,7 @@ let apiProcess;
 let dashboardServer;
 let dashboardUrl;
 let dashboardWindow;
+let pendingAuthCallback;
 let installationToken;
 const companionUrl = pathToFileURL(path.join(__dirname, 'companion.html')).href;
 let pollTimer;
@@ -137,6 +138,21 @@ function writePosition() {
   } catch { /* position persistence is optional; the companion remains usable */ }
 }
 
+function receiveAuthCallback(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== 'relay-ai:' || url.hostname !== 'auth' || url.pathname !== '/callback') return;
+    const code = url.searchParams.get('code');
+    if (!code || code.length > 4096) return;
+    pendingAuthCallback = { code };
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.webContents.send('relay:auth-callback', pendingAuthCallback);
+      pendingAuthCallback = undefined;
+      dashboardWindow.focus();
+    } else if (app.isReady()) void openDashboard().catch(() => {});
+  } catch { /* Ignore malformed external protocol URLs. */ }
+}
+
 function persistPosition() {
   if (!widget || widget.isDestroyed()) return;
   clearTimeout(positionTimer);
@@ -178,7 +194,7 @@ async function openDashboard() {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) return dashboardWindow.focus();
   dashboardWindow = new BrowserWindow({
     width: 1240, height: 850, title: 'Relay AI',
-    webPreferences: { partition: 'relay-installed-dashboard', sandbox: true, contextIsolation: true, nodeIntegration: false },
+    webPreferences: { partition: 'relay-installed-dashboard', preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false },
   });
   const contents = dashboardWindow.webContents;
   contents.session.webRequest.onBeforeSendHeaders({ urls: ['http://127.0.0.1:4317/api/v1/*'] }, (details, callback) => {
@@ -193,6 +209,10 @@ async function openDashboard() {
   contents.on('will-redirect', event => event.preventDefault());
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
   await dashboardWindow.loadURL(dashboardUrl);
+  if (pendingAuthCallback) {
+    dashboardWindow.webContents.send('relay:auth-callback', pendingAuthCallback);
+    pendingAuthCallback = undefined;
+  }
 }
 
 function createTray() {
@@ -403,11 +423,18 @@ handle('relay:move-by', (_event, dx, dy) => {
 handle('relay:open-dashboard', openDashboard);
 handle('relay:hide', () => widget?.hide());
 
+const initialAuthUrl = process.argv.find(arg => arg.startsWith('relay-ai://'));
+app.on('open-url', (event, url) => { event.preventDefault(); receiveAuthCallback(url); });
 if (!app.requestSingleInstanceLock()) app.quit();
-app.on('second-instance', () => { widget?.show(); widget?.focus(); });
+app.on('second-instance', (_event, commandLine) => {
+  widget?.show(); widget?.focus();
+  const authUrl = commandLine.find(arg => arg.startsWith('relay-ai://'));
+  if (authUrl) receiveAuthCallback(authUrl);
+});
 app.whenReady().then(async () => {
   if (!app.hasSingleInstanceLock()) return;
   app.setAppUserModelId('ai.relay.desktop');
+  app.setAsDefaultProtocolClient('relay-ai');
   createWidget();
   createTray();
   let online = false;
@@ -425,6 +452,8 @@ app.whenReady().then(async () => {
       fs.writeFileSync(setupMarker, '', { mode: 0o600 });
     }
   }
+  if (initialAuthUrl) receiveAuthCallback(initialAuthUrl);
+  else if (pendingAuthCallback && online) void openDashboard().catch(() => {});
 });
 
 app.on('before-quit', () => {
