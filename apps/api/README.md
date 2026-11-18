@@ -4,7 +4,7 @@ The local Node service provides a SQLite-backed project memory API and explicit 
 
 ## Run
 
-Use Node 22.9 or newer (the service uses built-in `node:sqlite` and optional `.env` loading):
+Use Node 24 LTS (the service uses built-in `node:sqlite` and optional `.env` loading):
 
 ```sh
 npm install
@@ -16,6 +16,8 @@ Copy `apps/api/.env.example` to `apps/api/.env` as needed. `GROQ_API_KEY` is opt
 For a Vercel-hosted frontend, keep this API on the user's computer and add the exact frontend URL to `WEB_ORIGINS` in `apps/api/.env` (comma-separated; no wildcards). The API only binds to loopback and rejects non-loopback `Host` headers, unapproved browser origins, cross-site browser fetches, unsupported methods, non-JSON writes, oversized bodies, and request bursts above its limit. See the root `VERCEL_DEPLOYMENT.md` for the full local-first deployment boundary.
 
 These checks reduce browser-based cross-site requests and accidental network exposure. They do not authenticate a process running as the same user: a local process can call the loopback API directly. Treat this as a single-user desktop service on a trusted machine, not an isolation boundary for untrusted local software or a multi-user server. CORS is an origin filter, not user authentication; only allow a frontend deployment you control.
+
+Installed Relay authenticates its API with a per-installation credential. The OpenCode bridge can load only its approved package, and MCP does not expose approval. The source development API retains the loopback workflow for contributors.
 
 ## Handoff lifecycle
 

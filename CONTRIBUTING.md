@@ -4,7 +4,7 @@ This guide is for anyone who wants to run Relay AI locally, try the app, or work
 
 ## Requirements
 
-- Node.js 22.9 or newer, with npm.
+- Node.js 24 LTS, with npm.
 - Git.
 - Windows, macOS, or Linux for the web app and API. The desktop companion currently targets Windows and macOS; Linux support is experimental.
 

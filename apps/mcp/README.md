@@ -8,12 +8,11 @@ Relay AI exposes its local project memory and handoff workflow to MCP-compatible
 - `relay_get_project_context`
 - `relay_save_memory`
 - `relay_create_handoff`
-- `relay_approve_handoff`
 - `relay_load_handoff`
 - `relay_get_handoff_history`
 - `relay_verify_repository`
 
-Approval is an explicit state transition. The MCP tool description asks the model to review the handoff and obtain explicit user approval before approving it. Returned provenance/evidence is from the local API and is not upgraded by the MCP layer.
+Approval is an explicit state transition. Approve drafts in the dashboard or desktop companion. MCP does not expose approval. Returned provenance/evidence is from the local API and is not upgraded by the MCP layer.
 
 ## Local setup
 
@@ -27,7 +26,7 @@ Set `RELAY_API_URL` to change the local API URL. Remote API URLs are rejected un
 
 ## Host configuration
 
-Use the absolute repository path in host configuration. This repository includes project-level configuration for OpenCode (`opencode.json`) and Codex (`.codex/config.toml`). OpenCode reads its local MCP server from `mcp.servers`; Codex reads its local MCP server from the trusted project's config. Reopen the repository in each client to load the configuration.
+The installed app connects to Codex app-server and registers an OpenCode tool for the approved package. For source development, open OpenCode at the repository root to load its project configuration.
 
 The Codex CLI can also register Relay globally:
 
@@ -35,6 +34,6 @@ The Codex CLI can also register Relay globally:
 codex mcp add relay-ai -- npm --prefix /absolute/path/to/relay-ai run mcp --workspace @relay-ai/mcp
 ```
 
-For a portable setup, replace the sample absolute path in both config files with the repository's local path. In OpenCode, use `/mcps` or `opencode mcp list` to check the connection. In Codex CLI, use `codex mcp list`.
+In OpenCode, use `/mcps` or `opencode mcp list` to check the connection. In Codex CLI, use `codex mcp list`.
 
 These configurations expose the MCP tools to the host. They do not install hooks, automatically capture every conversation, or silently inject handoff context. The assistant must call the tools, and an approved handoff must be loaded explicitly.

@@ -40,7 +40,11 @@ async function expand(value) {
 
 toggle.addEventListener('click', () => expand(!expanded));
 document.querySelector('#close').addEventListener('click', () => expand(false));
-document.querySelector('#dashboard').addEventListener('click', () => window.relayDesktop.openDashboard());
+  document.querySelector('#dashboard').addEventListener('click', () => {
+    void window.relayDesktop.openDashboard().catch(error => {
+      document.querySelector('#local-status').textContent = errorMessage(error);
+    });
+  });
 
 const workflow = document.querySelector('#switch-workflow');
 const monitor = document.querySelector('#monitor-view');
@@ -119,7 +123,11 @@ document.querySelector('#prepare-chat').addEventListener('click', async event =>
 document.querySelector('#launch-opencode').addEventListener('click', async event => {
   if (!draft) return;
   const button = event.currentTarget; button.disabled = true; status.textContent = 'Approving and opening OpenCode…';
-  try { await window.relayDesktop.openOpenCode(draft.id); if (workflowOpen) showStage('opened-stage'); }
+    try {
+      const result = await window.relayDesktop.openOpenCode(draft.id);
+      if (workflowOpen && result.opened) showStage('opened-stage');
+      else if (workflowOpen) { status.textContent = 'Approval canceled. Your draft is still available.'; button.disabled = false; }
+    }
   catch (error) { if (workflowOpen) { status.textContent = errorMessage(error); button.disabled = false; } }
 });
 document.addEventListener('keydown', event => {

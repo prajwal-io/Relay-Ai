@@ -4,16 +4,11 @@
     "servers": {
       "relay-ai": {
         "type": "local",
-        "cwd": "C:/Users/Prajwal.k/Documents/Codex/2026-10-30/relay-ai-master-build-multi-agent",
         "command": [
-          "npm",
-          "--silent",
-          "--prefix",
-          "C:/Users/Prajwal.k/Documents/Codex/2026-10-30/relay-ai-master-build-multi-agent",
-          "run",
-          "mcp",
-          "--workspace",
-          "@relay-ai/mcp"
+          "node",
+          "--import",
+          "tsx",
+          "apps/mcp/src/index.ts"
         ],
         "timeout": 30000
       }

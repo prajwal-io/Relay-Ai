@@ -11,6 +11,8 @@ coverage/
 *.log
 apps/web/tsconfig.tsbuildinfo
 outputs/
+apps/desktop/package-stage/
+apps/desktop/release/
 work/
 .codex/
 .taste-skill/

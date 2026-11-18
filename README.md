@@ -103,7 +103,7 @@ Creating or approving a package does not mean it has been transferred. The desti
 - The optional `GROQ_API_KEY` belongs in the local API environment. Never put it in a `VITE_` variable, frontend bundle, source control, or a handoff. Relay redacts common secret patterns before provider requests, but no redaction system is perfect.
 - When Groq extraction is used, requested text is sent to Groq after redaction. Without Groq, local extraction and basic handoffs continue to work.
 - An assistant may send retrieved context to its configured model provider. Review context and provider settings before use.
-- Repository evidence is limited to checks Relay actually performs. Tracked repository state is used to detect stale drafts; untracked file contents are not part of that snapshot.
+- Repository evidence is limited to checks Relay actually performs. Relay checks HEAD, the index, and the working tree, including non-ignored untracked contents within the snapshot limits.
 
 ## Run from source
 
@@ -111,7 +111,7 @@ When someone forks Relay AI, they can run the web dashboard and local backend to
 
 ### Requirements
 
-- Node.js 22.9 or newer.
+- Node.js 24 LTS.
 - Git on `PATH` for repository verification.
 - OpenCode installed separately to use the Codex-to-OpenCode desktop handoff.
 
@@ -138,7 +138,7 @@ In a second terminal at the repository root:
 npm run desktop
 ```
 
-The companion uses the local API and the development SQLite database. See [apps/desktop/README.md](apps/desktop/README.md) for controls and platform notes. The repository currently documents source-run development; signed, production installers are not available from the main branch.
+The companion uses the local API and the development SQLite database. See [apps/desktop/README.md](apps/desktop/README.md) for controls and platform notes. The desktop guide also covers installer builds and Windows/macOS release checks.
 
 ### Optional Groq extraction
 
@@ -146,7 +146,7 @@ Copy `apps/api/.env.example` to `apps/api/.env`, then set `GROQ_API_KEY` in that
 
 ### Connect Codex and OpenCode through MCP
 
-Relay's MCP server communicates with the local API over stdio. Sample project configuration is included in `.codex/config.toml` and `opencode.json`; replace their sample absolute repository paths with the path on your computer, then reopen/reload the project in each client. For details and the global Codex CLI option, see [apps/mcp/README.md](apps/mcp/README.md).
+Relay's MCP server communicates with the local API over stdio. The installed companion connects both assistants during the guided switch. For source development, OpenCode can use the repository configuration and Codex can use the registration command in the MCP guide. For details and the global Codex CLI option, see [apps/mcp/README.md](apps/mcp/README.md).
 
 To run the MCP server manually after starting the API:
 
@@ -154,7 +154,7 @@ To run the MCP server manually after starting the API:
 npm run mcp --workspace @relay-ai/mcp
 ```
 
-Relay exposes tools for listing projects, reading context, saving memory, creating and approving handoffs, loading approved context, retrieving handoff history, and checking repository state. MCP support does not automatically capture every conversation or silently inject context; the assistant must call Relay tools, and approval remains explicit.
+Relay exposes tools for listing projects, reading context, saving memory, creating handoffs, loading approved context, retrieving handoff history, and checking repository state. MCP support does not automatically capture every conversation or silently inject context; the assistant must call Relay tools, and approval remains explicit.
 
 ## Configuration
 
@@ -204,7 +204,7 @@ packages/shared/Shared TypeScript contracts
 
 - Single-user local service; no sign-in, team workspace, cloud sync, shared database, or billing.
 - No native mobile client. Relay is aimed at Windows and macOS laptops/desktops; Linux terminal launching is experimental.
-- No signed or notarized production installer is currently provided from the main branch.
+- This branch builds a Windows installer and prepares a signed macOS workflow. Public release requires clean-machine validation and signing credentials.
 - Desktop source includes the Codex-to-OpenCode workflow. A local mock-provider OpenCode test validates tool retrieval, but a live model/provider handoff remains unverified.
 - OpenCode's runtime MCP API is experimental.
 - Retrieval receipts prove package retrieval, not model comprehension or task completion.

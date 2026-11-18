@@ -64,3 +64,24 @@ test('desktop waits for Relay identity before declaring startup ready', async ()
   assert.equal(result.notice, 'Watching local projects');
   assert.equal(result.process, child);
 });
+
+test('packaged desktop launches the bundled API with local user data and dashboard origin', async () => {
+  const child = new EventEmitter();
+  let spawned;
+  let probes = 0;
+  const result = await startLocalApi({
+    apiBase: 'http://127.0.0.1:4317/api/v1', apiRoot: 'C:/app/api', dbPath: 'C:/user/Relay/data/relay.sqlite',
+    packaged: true, runtimePath: 'C:/app/Relay.exe', apiEntry: 'C:/app/api/server.cjs', userDataPath: 'C:/user/Relay',
+    envFilePath: 'C:/user/Relay/api.env', dashboardOrigin: 'http://127.0.0.1:49823', configPath: 'C:/user/Relay/api.env',
+    attempts: 2, intervalMs: 0, sleepImpl: async () => {},
+    fetchImpl: async () => ++probes === 1 ? new Response('{}', { status: 503 }) : relayHealth(),
+    spawnProcess: (command, args, options) => { spawned = { command, args, options }; return child; },
+  });
+  assert.equal(result.notice, 'Watching local projects');
+  assert.equal(spawned.command, 'C:/app/Relay.exe');
+  assert.deepEqual(spawned.args, ['--env-file-if-exists=C:/user/Relay/api.env', 'C:/app/api/server.cjs']);
+  assert.equal(spawned.options.cwd, 'C:/user/Relay');
+  assert.equal(spawned.options.env.ELECTRON_RUN_AS_NODE, '1');
+  assert.equal(spawned.options.env.RELAY_DB_PATH, 'C:/user/Relay/data/relay.sqlite');
+  assert.equal(spawned.options.env.WEB_ORIGIN, 'http://127.0.0.1:49823');
+});

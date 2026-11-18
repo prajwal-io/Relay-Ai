@@ -1,9 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { lstat, readlink, realpath } from "node:fs/promises";
+import { dirname } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { db } from "./db.js";
-import { collectRepositoryEvidence, validateRootPath } from "./repository.js";
+import { collectRepositoryEvidence, resolveProjectFile, validateRootPath } from "./repository.js";
 import type { AgentKind, Evidence, Handoff, HandoffReceipt, HandoffReceiptEntry, MemoryItem, MemoryKind, Project } from "../../../packages/shared/src/contracts.js";
 import { configuredExtractionProvider, extractContext } from "./intelligence.js";
 
@@ -11,6 +14,12 @@ const API = "/api/v1";
 const exec = promisify(execFile);
 const PORT = Number(process.env.PORT ?? 4317);
 const HOST = process.env.HOST ?? "127.0.0.1";
+const installationToken = process.env.RELAY_INSTALLATION_TOKEN;
+const matchesToken = (received: string, expected: string) => {
+  const a = Buffer.from(received);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+};
 if (!["127.0.0.1", "localhost", "::1"].includes(HOST)) {
   throw new Error("Relay API must bind to loopback. Remote binding is not supported by the local-first service.");
 }
@@ -113,7 +122,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   // have no Fetch Metadata headers and remain supported over loopback.
   if (req.headers["sec-fetch-site"] === "cross-site") return fail(res, 403, "CROSS_SITE_REQUEST", "Cross-site browser requests cannot access the local Relay service", origin);
   if (req.method === "OPTIONS") {
-    res.writeHead(204, { "access-control-allow-origin": origin && allowedOrigins.has(origin) ? origin : "null", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type", "access-control-max-age": "600", vary: "Origin" });
+    res.writeHead(204, { "access-control-allow-origin": origin && allowedOrigins.has(origin) ? origin : "null", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type, authorization", "access-control-max-age": "600", vary: "Origin" });
     return res.end();
   }
   if (req.method === "POST" && !/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] ?? "")) {
@@ -135,8 +144,21 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     return fail(res, 429, "RATE_LIMITED", "Too many requests to the local Relay service", origin);
   }
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
-    if (req.method === "GET" && url.pathname === `${API}/health`) return json(res, 200, { ok: true, service: "relay-ai", version: "0.1.0", intelligenceProvider: configuredExtractionProvider() }, origin);
-  if (!url.pathname.startsWith(API)) return fail(res, 404, "NOT_FOUND", "Route not found", origin);
+  const challenge = url.searchParams.get("challenge");
+  if (installationToken && req.method === "GET" && url.pathname === `${API}/health` && challenge && /^[a-f0-9]{64}$/.test(challenge)) {
+    return json(res, 200, { proof: createHmac("sha256", installationToken).update(`health:${challenge}`).digest("hex") }, origin);
+  }
+  if (installationToken) {
+    const received = req.headers.authorization ?? "";
+    const scoped = req.method === "POST" && url.pathname.match(/^\/api\/v1\/handoffs\/([a-f0-9-]{36})\/load$/);
+    const scopedToken = scoped && createHmac("sha256", installationToken).update(`load:${scoped[1]}`).digest("hex");
+    if (!matchesToken(received, `Bearer ${installationToken}`) &&
+        !(scopedToken && matchesToken(received, `Bearer ${scopedToken}`))) {
+      return fail(res, 401, "UNAUTHORIZED", "Open the dashboard from the Relay desktop app.", origin);
+    }
+  }
+  if (req.method === "GET" && url.pathname === `${API}/health`) return json(res, 200, { ok: true, service: "relay-ai", version: "0.1.0", intelligenceProvider: configuredExtractionProvider() }, origin);
+  if (!url.pathname.startsWith(`${API}/`)) return fail(res, 404, "NOT_FOUND", "Route not found", origin);
   const path = url.pathname.slice(API.length).split("/").filter(Boolean).map(decodeURIComponent);
   const method = req.method ?? "GET";
 
@@ -236,7 +258,11 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         if (requested.some((id: string) => !handoff.memoryItemIds.includes(id))) return fail(res, 400, "ITEM_NOT_IN_HANDOFF", "Approved items must come from this draft package", origin);
         handoff = { ...handoff, memoryItemIds: requested };
       }
-      handoff = { ...handoff, status: "approved", approvedAt: new Date().toISOString() }; updateHandoff(handoff); return json(res, 200, handoff, origin);
+      handoff = { ...handoff, status: "approved", approvedAt: new Date().toISOString() };
+      const update = db.prepare("UPDATE handoffs SET memory_ids_json=?,status=?,approved_at=? WHERE id=? AND status='draft'")
+        .run(JSON.stringify(handoff.memoryItemIds), handoff.status, handoff.approvedAt!, handoff.id);
+      if (!update.changes) return fail(res, 409, "INVALID_HANDOFF_STATE", "Only draft handoffs can be approved", origin);
+      return json(res, 200, handoff, origin);
     }
     if (path.length === 3 && path[2] === "load" && method === "POST") {
       const data = await body(req);
@@ -322,13 +348,37 @@ async function getGitState(root: string): Promise<Evidence[]> {
   const observedAt = new Date().toISOString();
   try {
     const options = { timeout: 5000, windowsHide: true, maxBuffer: 5_000_000 };
-    const [status, head, diff] = await Promise.all([
+    const { stdout: topLevel } = await exec("git", ["-C",root,"rev-parse","--show-toplevel"], options);
+    const gitRoot = await realpath(topLevel.trimEnd());
+    const [status, head, diff, index, untracked] = await Promise.all([
       exec("git", ["-C",root,"status","--short","--branch"], options),
       exec("git", ["-C",root,"rev-parse","HEAD"], options),
-      exec("git", ["-C",root,"diff","--binary","HEAD"], options),
+      exec("git", ["-C",root,"diff","--no-ext-diff","--no-textconv","--binary","HEAD"], { ...options, encoding: "buffer" }),
+      exec("git", ["-C",root,"diff","--cached","--no-ext-diff","--no-textconv","--binary","HEAD"], { ...options, encoding: "buffer" }),
+      exec("git", ["-C",gitRoot,"ls-files","--others","--exclude-standard","-z"], options),
     ]);
-    const fingerprint = createHash("sha256").update(head.stdout).update("\0").update(status.stdout).update("\0").update(diff.stdout).digest("hex").slice(0, 16);
-    return [{ kind: "git-status", status: "verified", description: `Repository snapshot: ${fingerprint}. Git HEAD, status, and tracked diff observed; untracked file contents are not checked.`, observedAt, source: "repository" }];
+    const fingerprint = createHash("sha256").update(head.stdout).update("\0").update(status.stdout)
+      .update(createHash("sha256").update(diff.stdout).digest()).update(createHash("sha256").update(index.stdout).digest());
+    let bytes = 0;
+    const files = untracked.stdout.split("\0").filter(Boolean).sort();
+    if (files.length > 2000) throw new Error("Too many untracked files");
+    for (const name of files) {
+      const target = resolveProjectFile(gitRoot, name);
+      const info = await lstat(target);
+      if (await realpath(dirname(target)) !== dirname(target)) throw new Error("Unsafe file path");
+      const content = createHash("sha256");
+      if (info.isSymbolicLink()) content.update(await readlink(target, { encoding: "buffer" }));
+      else {
+        if (!info.isFile() || await realpath(target) !== target) throw new Error("Unsafe untracked file");
+        for await (const chunk of createReadStream(target)) {
+          bytes += chunk.length;
+          if (bytes > 50_000_000) throw new Error("Untracked files exceed snapshot limit");
+          content.update(chunk);
+        }
+      }
+      fingerprint.update("\0").update(name).update("\0").update(info.isSymbolicLink() ? "link" : "file").update(content.digest());
+    }
+    return [{ kind: "git-status", status: "verified", description: `Repository snapshot: ${fingerprint.digest("hex")}. Git HEAD, status, tracked diff, and non-ignored untracked content observed.`, observedAt, source: "repository" }];
   } catch { return [{ kind: "git-status", status: "unverified", description: "Git state could not be read for this directory.", observedAt, source: "repository" }]; }
 }
 

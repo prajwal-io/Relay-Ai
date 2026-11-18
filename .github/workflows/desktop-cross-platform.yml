@@ -2,6 +2,12 @@ name: Cross-platform desktop checks
 
 on:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      signed_macos:
+        description: Build and verify a signed, notarized macOS image
+        type: boolean
+        default: false
   push:
     branches: [main, "codex/**"]
 
@@ -20,8 +26,54 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm test
-      - run: npm run build
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        run: npm run package:windows
+      - name: Build macOS universal disk image
+        if: runner.os == 'macOS'
+        run: npm run package:macos
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-ai-${{ runner.os }}
+          path: apps/desktop/release/*
+          if-no-files-found: error
+
+  signed-macos:
+    if: github.event_name == 'workflow_dispatch' && inputs.signed_macos
+    runs-on: macos-latest
+    environment: release-signing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Sign and notarize the universal macOS build
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!name}" ]]; then echo "Missing signing secret: $name"; exit 1; fi
+          done
+          npm run build
+          npm run package:stage --workspace apps/desktop
+          npm run package:macos --workspace apps/desktop -- --publish never -c.forceCodeSigning=true -c.mac.notarize=true -c.dmg.sign=true
+          app="$(find apps/desktop/release -name 'Relay AI.app' -type d -print -quit)"
+          test -n "$app"
+          codesign --verify --deep --strict "$app"
+          xcrun stapler validate "$app"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-ai-macos-signed
+          path: apps/desktop/release/*.dmg
+          if-no-files-found: error

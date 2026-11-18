@@ -1,0 +1,33 @@
+appId: ai.relay.desktop
+productName: Relay AI
+copyright: Copyright © 2026 Relay AI
+directories:
+  app: package-stage
+  output: release
+asar: true
+asarUnpack:
+  - "api/*.cjs"
+  - "mcp/index.cjs"
+electronVersion: 45.3.2
+files:
+  - "**/*"
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: Relay-AI-Setup-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+mac:
+  target:
+    - target: dmg
+      arch: [universal]
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  artifactName: Relay-AI-${version}-${arch}.${ext}
+dmg:
+  sign: false

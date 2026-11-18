@@ -25,9 +25,11 @@ function resolveApiBase(): URL {
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const url = new URL(path.replace(/^\//, ""), apiBase);
+  const token = process.env.RELAY_MCP_ACCESS_TOKEN;
   const response = await fetch(url, {
     ...init,
-    headers: { "content-type": "application/json", ...init?.headers },
+    redirect: "error",
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}), ...init?.headers },
     signal: AbortSignal.timeout(12_000),
   });
   const text = await response.text();
@@ -149,22 +151,6 @@ function createServer() {
       try {
         return jsonResult(await api<Handoff>(`projects/${encodeURIComponent(projectId)}/handoffs`, {
           method: "POST", body: JSON.stringify(handoff),
-        }));
-      } catch (error) { return errorResult(error); }
-    },
-  );
-
-  server.registerTool(
-    "relay_approve_handoff",
-    {
-      title: "Approve a handoff",
-      description: "Approve a draft context package for transfer. This is a consequential action; review the draft with the user and get their explicit approval before calling.",
-      inputSchema: z.object({ handoffId: z.string().min(1), includeItemIds: z.array(z.string()).optional() }),
-    },
-    async ({ handoffId, includeItemIds }) => {
-      try {
-        return jsonResult(await api<Handoff>(`handoffs/${encodeURIComponent(handoffId)}/approve`, {
-          method: "POST", body: JSON.stringify(includeItemIds ? { includeItemIds } : {}),
         }));
       } catch (error) { return errorResult(error); }
     },
