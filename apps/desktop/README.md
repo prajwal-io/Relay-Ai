@@ -38,6 +38,16 @@ From the repository root, run `npm run package:windows` on Windows for an NSIS i
 
 Run the **Cross-platform desktop checks** workflow with the signed macOS option. Configure its release-signing environment with MAC_CSC_LINK, MAC_CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID. The job verifies the signature and stapled ticket before uploading the DMG artifact.
 
+## Release acceptance on a clean machine
+
+1. Install the Windows x64 setup executable on a Windows account without Node.js. Launch Relay and open its dashboard from the tray.
+2. Install Git, Codex CLI, and OpenCode CLI. Sign into Codex and configure a tool-capable OpenCode model. Recheck setup from the tray.
+3. In a disposable Git project, create a Codex chat with a synthetic reference that OpenCode has never seen. Choose the chat, review the draft, cancel approval once, then approve it and open OpenCode.
+4. Confirm an OpenCode tool permission denial leaves the handoff approved. Allow it and retry. Confirm the model can repeat the reference and Relay shows a receipt with the retrieved context. Repeat with a file changed after draft creation and confirm Relay requires a new draft.
+5. Back up the database, quit Relay, reopen it, and confirm the receipt persists. Restore the backup and confirm the receipt is still available.
+
+Repeat the install and handoff checks on macOS after signing and notarization. Publish only the artifacts you verified and include their SHA-256 checksums.
+
 ## Switch a Codex chat to OpenCode
 
 Open **Switch a Codex chat**, choose a chat, and edit its text before preparing the draft. Relay uses Codex's local app-server to collect user and assistant text messages. It excludes reasoning, tool output, and non-text attachments; it refuses chats above 240,000 characters instead of silently truncating them. Common credentials are masked, but masking is incomplete: inspect the text before proceeding. Preparing a draft saves the reviewed text as local project memory. Relay fingerprints HEAD, the index, tracked changes, and non-ignored untracked content. Ignored files and chat claims are outside verification. A changed snapshot requires a new draft.
