@@ -33,6 +33,17 @@ jobs:
       - name: Build Windows installer
         if: runner.os == 'Windows'
         run: npm run package:windows
+      - name: Install and check the Windows desktop app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path apps/desktop/release -Filter 'Relay-AI-Setup-*-x64.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'The Windows installer is missing.' }
+          $installDir = Join-Path $env:RUNNER_TEMP 'relay-installed'
+          $result = Start-Process -FilePath $installer.FullName -ArgumentList "/S /D=$installDir" -Wait -PassThru -WindowStyle Hidden
+          if ($result.ExitCode -ne 0) { throw "Relay installer exited with code $($result.ExitCode)." }
+          $env:RELAY_SMOKE_SOAK_SECONDS = '65'
+          node apps/desktop/scripts/windows-smoke.cjs (Join-Path $installDir 'Relay AI.exe')
       - name: Build macOS universal disk image
         if: runner.os == 'macOS'
         run: npm run package:macos

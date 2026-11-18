@@ -347,30 +347,23 @@ async function ensureApi() {
 
 async function pollActivity() {
   try {
-    const projectsPayload = await requestJson(`${apiBase}/projects`);
-    const projects = Array.isArray(projectsPayload) ? projectsPayload : projectsPayload.projects || [];
-    const handoffs = (await Promise.all(projects.map(async project => {
-      try {
-        const payload = await requestJson(`${apiBase}/projects/${encodeURIComponent(project.id)}/handoffs`);
-        return Array.isArray(payload) ? payload : payload.handoffs || [];
-      } catch { return []; }
-    }))).flat().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const { projectCount, handoffs } = await requestJson(`${apiBase}/activity`);
 
     let completed;
     for (const handoff of handoffs) {
       const previous = lastHandoffs.get(handoff.id);
       if (previous === 'approved' && handoff.status === 'loaded') completed = handoff;
-      lastHandoffs.set(handoff.id, handoff.status);
     }
+    lastHandoffs = new Map(handoffs.map(handoff => [handoff.id, handoff.status]));
     const recent = handoffs[0] ? {
       title: handoffs[0].title, source: handoffs[0].source, destination: handoffs[0].destination,
       status: handoffs[0].status, verification: handoffs[0].verification,
-      itemCount: handoffs[0].memoryItemIds?.length || 0
+      itemCount: handoffs[0].itemCount
     } : null;
-    currentState = { ...currentState, online: true, projectCount: projects.length, recent, event: completed ? {
+    currentState = { ...currentState, online: true, projectCount, recent, event: completed ? {
       title: completed.title, source: completed.source, destination: completed.destination,
       status: completed.status, verification: completed.verification,
-      itemCount: completed.memoryItemIds?.length || 0, createdAt: completed.createdAt
+      itemCount: completed.itemCount, createdAt: completed.createdAt
     } : null, notice: completed ? 'Handoff retrieved' : 'Watching local projects' };
     sendState();
   } catch {

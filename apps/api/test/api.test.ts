@@ -67,11 +67,36 @@ test("installation credentials and scoped handoff access are enforced", async ()
   const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
   const scoped = (path: string) => fetch(`${base}/handoffs/${path}`, { method: "POST", headers, body: '{"destination":"opencode"}' });
   assert.equal((await fetch(`${base}/projects`, { headers })).status, 401);
+  assert.equal((await fetch(`${base}/activity`, { headers })).status, 401);
   assert.equal((await scoped(`${draft.id}/approve`)).status, 401);
   assert.equal((await scoped(`00000000-0000-4000-8000-000000000000/load`)).status, 401);
   assert.equal((await scoped(`${draft.id}/load`)).status, 409);
   assert.equal((await post(`${base}/handoffs/${draft.id}/approve`, {})).status, 200);
   assert.equal((await scoped(`${draft.id}/load`)).status, 200);
+});
+
+test("activity is global, bounded, and promotes recently retrieved packages", async () => {
+  const fixtures = [];
+  for (let index = 0; index < 24; index++) {
+    const root = join(temp, `activity-${index}`);
+    await mkdir(root);
+    const project = await (await post(`${base}/projects`, { name: `Activity ${index}`, rootPath: root })).json() as any;
+    fixtures.push(await (await post(`${base}/projects/${project.id}/handoffs`, {
+      source: "codex", destination: "opencode", title: `Activity handoff ${index}`,
+    })).json() as any);
+  }
+  const oldest = fixtures[0];
+  const first = await (await fetch(`${base}/activity`)).json() as any;
+  assert.ok(first.projectCount >= 24);
+  assert.equal(first.handoffs.length, 20);
+  assert.equal(first.handoffs.some((handoff: any) => handoff.id === oldest.id), false);
+  assert.equal((await post(`${base}/handoffs/${oldest.id}/approve`, {})).status, 200);
+  assert.equal((await post(`${base}/handoffs/${oldest.id}/load`, { destination: "opencode" })).status, 200);
+  const recent = await (await fetch(`${base}/activity`)).json() as any;
+  assert.deepEqual(recent.handoffs[0], {
+    id: oldest.id, projectId: oldest.projectId, title: oldest.title, source: "codex", destination: "opencode",
+    status: "loaded", verification: oldest.verification, createdAt: oldest.createdAt, itemCount: 0,
+  });
 });
 
 test("SQLite backup and restore preserve project data", async () => {

@@ -40,6 +40,8 @@ Run the **Cross-platform desktop checks** workflow with the signed macOS option.
 
 ## Release acceptance on a clean machine
 
+The Windows CI job installs the new setup executable, checks the landing page, dashboard, and companion together, and runs a 65-second sync check. To run the same browser and companion checks against the unpacked package locally, close any running Relay instances and run `node apps/desktop/scripts/windows-smoke.cjs` from the repository root. Set `RELAY_SMOKE_SOAK_SECONDS=65` for the extended check.
+
 1. Install the Windows x64 setup executable on a Windows account without Node.js. Launch Relay and open its dashboard from the tray.
 2. Install Git, Codex CLI, and OpenCode CLI. Sign into Codex and configure a tool-capable OpenCode model. Recheck setup from the tray.
 3. In a disposable Git project, create a Codex chat with a synthetic reference that OpenCode has never seen. Choose the chat, review the draft, cancel approval once, then approve it and open OpenCode.

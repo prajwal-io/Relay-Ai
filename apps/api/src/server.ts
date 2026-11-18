@@ -162,6 +162,14 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   const path = url.pathname.slice(API.length).split("/").filter(Boolean).map(decodeURIComponent);
   const method = req.method ?? "GET";
 
+  if (method === "GET" && path.length === 1 && path[0] === "activity") {
+    const { count } = db.prepare("SELECT COUNT(*) AS count FROM projects").get() as { count: number };
+    const handoffs = db.prepare(`SELECT id, project_id AS projectId, title, source, destination, status, verification,
+      created_at AS createdAt, json_array_length(memory_ids_json) AS itemCount
+      FROM handoffs ORDER BY MAX(created_at, COALESCE(approved_at, ''), COALESCE(loaded_at, '')) DESC, rowid DESC LIMIT 20`).all();
+    return json(res, 200, { projectCount: count, handoffs }, origin);
+  }
+
   if (method === "GET" && path.length === 1 && path[0] === "projects") {
     return json(res, 200, (db.prepare("SELECT * FROM projects ORDER BY updated_at DESC").all() as any[]).map(projectFrom), origin);
   }

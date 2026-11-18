@@ -122,7 +122,7 @@ function RelayMotionGraphic() {
 export default function LandingPage({ goDashboard }: { goDashboard: () => void }) {
   const [menuOpen, setMenuOpen] = useState(false);
   useSectionMotion();
-  return <main className="relay-landing" id="main-content">
+  return <main className="relay-landing" id="main-content" tabIndex={-1}>
     <header className="relay-header" id="top"><Wordmark/><nav id="landing-navigation" className={menuOpen ? 'open' : ''} aria-label="Main navigation"><a href="#product" onClick={() => setMenuOpen(false)}>Product</a><a href="#how" onClick={() => setMenuOpen(false)}>How it works</a><a href="#features" onClick={() => setMenuOpen(false)}>Features</a><a href="#verification" onClick={() => setMenuOpen(false)}>Verification</a></nav><div className="header-actions"><button className="header-launch" onClick={goDashboard}>Launch dashboard <ArrowRight size={14}/></button></div><button className="mobile-nav-toggle" onClick={() => setMenuOpen(!menuOpen)} aria-label={menuOpen ? 'Close menu' : 'Open menu'} aria-expanded={menuOpen} aria-controls="landing-navigation">{menuOpen ? <X size={20}/> : <Menu size={20}/>}</button></header>
 
     <section className="relay-hero" id="product">

@@ -108,25 +108,21 @@ function Dashboard({ goHome }: { goHome: () => void }) {
   const [projectName, setProjectName] = useState('');
   const [saving, setSaving] = useState(false);
   const [showMobileNav, setShowMobileNav] = useState(false);
-  const observedHandoffStatus = useRef(new Map<string, string>());
+  const selectedProject = useRef('');
 
   const load = async () => {
     setLoading(true); setError('');
     try {
       const [health, p] = await Promise.all([fetch(`${API}/health`), fetch(`${API}/projects`)]);
-      if (!health.ok || !p.ok) throw new Error('The local service returned an error.');
+      if (!health.ok || !p.ok) throw new Error('Open the dashboard from the Relay desktop tray. If you are running from source, start the local servers with npm run dev.');
       const healthInfo = await health.json(); setExtractionProvider(healthInfo.intelligenceProvider === 'groq' ? 'groq' : 'local');
       const pj = await p.json(); setProjects(Array.isArray(pj) ? pj : pj.projects ?? []); setServiceState('ok');
-      if (!selectedProjectId && (Array.isArray(pj) ? pj : pj.projects ?? []).length) setSelectedProjectId((Array.isArray(pj) ? pj : pj.projects)[0].id);
-      const recent = await Promise.all((Array.isArray(pj) ? pj : pj.projects ?? []).slice(0, 4).map(async (project: Project) => {
-        const response = await fetch(`${API}/projects/${encodeURIComponent(project.id)}/handoffs`);
-        if (!response.ok) return [];
-        const data = await response.json(); return Array.isArray(data) ? data : data.handoffs ?? [];
-      }));
-      const knownHandoffs = recent.flat();
-      knownHandoffs.forEach((handoff: Handoff) => observedHandoffStatus.current.set(handoff.id, handoff.status));
-      setHandoffs(knownHandoffs.slice(0, 5));
-    } catch (e) { setServiceState('offline'); setError(e instanceof Error ? e.message : 'Could not reach the local service.'); }
+      if (!selectedProject.current && Array.isArray(pj) && pj.length) { selectedProject.current = pj[0].id; setSelectedProjectId(pj[0].id); }
+
+    } catch {
+      setServiceState('offline');
+      setError('Open the dashboard from the Relay desktop tray. If you are running from source, start the local servers with npm run dev.');
+    }
     finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, []);
@@ -137,30 +133,22 @@ function Dashboard({ goHome }: { goHome: () => void }) {
     try {
       const r = await fetch(`${API}/projects`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: projectName.trim(), rootPath: projectPath.trim() }) });
       if (!r.ok) { const body = await r.json().catch(() => ({})); throw new Error(body.error?.message ?? 'Could not add this project.'); }
-      const created = await r.json(); setProjects(p => [created, ...p]); setSelectedProjectId(created.id); setProjectName(''); setProjectPath(''); setShowConnect(false); setTab('Projects');
+      const created = await r.json(); setProjects(p => [created, ...p]); selectedProject.current = created.id; setSelectedProjectId(created.id); setProjectName(''); setProjectPath(''); setShowConnect(false); setTab('Projects');
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not add this project.'); }
     finally { setSaving(false); }
   };
 
   const chooseProject = async (id: string) => {
-    setSelectedProjectId(id); setMemoryItems([]); setVerifyResult(null); setError('');
+    if (selectedProject.current !== id) {
+      selectedProject.current = id; setSelectedProjectId(id); setMemoryItems([]); setProjectHandoffs([]); setActiveHandoff(null); setHandoffItems([]); setIncludedIds([]); setVerifyResult(null);
+    }
+    setError('');
     if (!id) return;
-    try { const response = await fetch(`${API}/projects/${encodeURIComponent(id)}/memory`); if (!response.ok) throw new Error('Could not load project memory.'); setMemoryItems(await response.json()); }
-    catch (e) { setError(e instanceof Error ? e.message : 'Could not load project memory.'); }
+    try { const response = await fetch(`${API}/projects/${encodeURIComponent(id)}/memory`); if (!response.ok) throw new Error('Could not load project memory.'); const items = await response.json(); if (selectedProject.current === id) setMemoryItems(items); }
+    catch (e) { if (selectedProject.current === id) setError(e instanceof Error ? e.message : 'Could not load project memory.'); }
   };
   useEffect(() => {
-    if (tab !== 'Context explorer' || !selectedProjectId) return;
-    void fetch(`${API}/projects/${encodeURIComponent(selectedProjectId)}/memory`).then(async response => {
-      if (!response.ok) throw new Error('Could not load project memory.');
-      setMemoryItems(await response.json());
-    }).catch(e => setError(e instanceof Error ? e.message : 'Could not load project memory.'));
-  }, [tab, selectedProjectId]);
-  useEffect(() => {
-    if (tab !== 'Handoff studio' || !selectedProjectId) return;
-    void fetch(`${API}/projects/${encodeURIComponent(selectedProjectId)}/handoffs`).then(async response => {
-      if (!response.ok) throw new Error('Could not load saved handoffs.');
-      setProjectHandoffs(await response.json());
-    }).catch(e => setError(e instanceof Error ? e.message : 'Could not load saved handoffs.'));
+    if (tab === 'Context explorer' && selectedProjectId) void chooseProject(selectedProjectId);
   }, [tab, selectedProjectId]);
   useEffect(() => {
     let stopped = false;
@@ -174,36 +162,48 @@ function Dashboard({ goHome }: { goHome: () => void }) {
     return () => { stopped = true; };
   }, [activeHandoff?.id, activeHandoff?.status]);
   useEffect(() => {
-    if (serviceState !== 'ok' || !selectedProjectId) return;
-    let stopped = false;
-    const refreshHandoffActivity = async () => {
+    if (serviceState !== 'ok') return;
+    const controller = new AbortController();
+    let timer: number;
+    const refresh = async () => {
       try {
-        const response = await fetch(`${API}/projects/${encodeURIComponent(selectedProjectId)}/handoffs`);
-        if (!response.ok) return;
-        const current: Handoff[] = await response.json();
-        if (stopped) return;
-        current.forEach(handoff => {
-          const previous = observedHandoffStatus.current.get(handoff.id);
-          observedHandoffStatus.current.set(handoff.id, handoff.status);
-        });
-        setProjectHandoffs(current);
-        const currentById = new Map(current.map(handoff => [handoff.id, handoff]));
-        setActiveHandoff(previous => previous ? currentById.get(previous.id) ?? previous : previous);
-        setHandoffs(previous => {
-          return previous.map(handoff => currentById.get(handoff.id) ?? handoff);
-        });
-      } catch { /* keep the last-known activity when the local service is temporarily unavailable */ }
+        const read = async (path: string) => {
+          const response = await fetch(`${API}${path}`, { signal: controller.signal });
+          if (!response.ok) throw new Error('Could not refresh Relay activity.');
+          return response.json();
+        };
+        const [activity, currentProjects, current] = await Promise.all([
+          read('/activity'), read('/projects'),
+          tab === 'Handoff studio' && selectedProjectId
+            ? read(`/projects/${encodeURIComponent(selectedProjectId)}/handoffs`)
+            : null,
+        ]);
+        if (controller.signal.aborted) return;
+        setProjects(currentProjects);
+        if (!selectedProject.current && currentProjects.length) {
+          selectedProject.current = currentProjects[0].id;
+          setSelectedProjectId(currentProjects[0].id);
+        }
+        setHandoffs(activity.handoffs.slice(0, 5));
+        if (current) {
+          setProjectHandoffs(current);
+          setActiveHandoff(previous => previous ? current.find((handoff: Handoff) => handoff.id === previous.id) ?? previous : previous);
+        }
+      } catch { /* The next poll can recover a temporary service failure. */ }
+      finally { if (!controller.signal.aborted) timer = window.setTimeout(refresh, 3500); }
     };
-    void refreshHandoffActivity();
-    const timer = window.setInterval(() => void refreshHandoffActivity(), 3500);
-    return () => { stopped = true; window.clearInterval(timer); };
-  }, [selectedProjectId, serviceState]);
+    void refresh();
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [selectedProjectId, serviceState, tab]);
   const reviewHandoff = async (handoff: Handoff) => {
-    setWorking(true); setError(''); setActiveHandoff(handoff); setHandoffTitle(handoff.title); setHandoffSource(handoff.source); setHandoffDestination(handoff.destination);
+    const projectId = handoff.projectId ?? selectedProjectId;
+    setWorking(true); setError(''); setActiveHandoff(null);
     try {
-      const response = await fetch(`${API}/projects/${encodeURIComponent(handoff.projectId ?? selectedProjectId)}/memory`);
+      const response = await fetch(`${API}/projects/${encodeURIComponent(projectId)}/memory`);
       if (!response.ok) throw new Error('Could not load this handoff’s saved context.');
       const items: MemoryItem[] = await response.json();
+      if (selectedProject.current !== projectId) return;
+      setActiveHandoff(handoff); setHandoffTitle(handoff.title); setHandoffSource(handoff.source); setHandoffDestination(handoff.destination);
       setHandoffItems(items.filter(item => handoff.memoryItemIds?.includes(item.id)));
       setIncludedIds(handoff.memoryItemIds ?? []);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not load this handoff’s saved context.'); }
@@ -215,7 +215,7 @@ function Dashboard({ goHome }: { goHome: () => void }) {
     try {
       const response = await fetch(`${API}/projects/${encodeURIComponent(selectedProjectId)}/memory`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: draftKind, content: draftText.trim(), status: draftKind === 'task' || draftKind === 'issue' ? draftStatus : undefined, source: 'user' }) });
       const item = await response.json(); if (!response.ok) throw new Error(item.error?.message ?? 'Could not save memory.');
-      setDraftText(''); await chooseProject(selectedProjectId);
+      if (selectedProject.current === selectedProjectId) { setDraftText(''); await chooseProject(selectedProjectId); }
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save memory.'); }
     finally { setWorking(false); }
   };
@@ -225,9 +225,12 @@ function Dashboard({ goHome }: { goHome: () => void }) {
     try {
       const response = await fetch(`${API}/projects/${encodeURIComponent(selectedProjectId)}/handoffs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: handoffSource, destination: handoffDestination, title: handoffTitle.trim() || undefined, query: handoffQuery.trim() || undefined }) });
       const handoff = await response.json(); if (!response.ok) throw new Error(handoff.error?.message ?? 'Could not prepare a handoff.');
-      const memoryResponse = await fetch(`${API}/projects/${encodeURIComponent(selectedProjectId)}/memory`); const allItems: MemoryItem[] = await memoryResponse.json();
+      const memoryResponse = await fetch(`${API}/projects/${encodeURIComponent(selectedProjectId)}/memory`);
+      if (!memoryResponse.ok) throw new Error('Draft saved. Reopen it from Saved packages to review its context.');
+      const allItems: MemoryItem[] = await memoryResponse.json();
+      if (selectedProject.current !== selectedProjectId) return;
       const included = allItems.filter(item => handoff.memoryItemIds?.includes(item.id));
-      observedHandoffStatus.current.set(handoff.id, handoff.status);
+
       setActiveHandoff(handoff); setHandoffItems(included); setIncludedIds(included.map(item => item.id)); setHandoffTitle(''); setHandoffs(prev => [handoff, ...prev]); setProjectHandoffs(prev => [handoff, ...prev.filter(item => item.id !== handoff.id)]);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not prepare a handoff.'); }
     finally { setWorking(false); }
@@ -238,7 +241,7 @@ function Dashboard({ goHome }: { goHome: () => void }) {
     try {
       const response = await fetch(`${API}/handoffs/${encodeURIComponent(activeHandoff.id)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ includeItemIds: includedIds }) });
       const updated = await response.json(); if (!response.ok) throw new Error(updated.error?.message ?? 'Could not approve handoff.');
-      observedHandoffStatus.current.set(updated.id, updated.status);
+
       setActiveHandoff(updated); setHandoffs(prev => prev.map(h => h.id === updated.id ? updated : h)); setProjectHandoffs(prev => prev.map(h => h.id === updated.id ? updated : h));
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not approve handoff.'); }
     finally { setWorking(false); }
@@ -249,7 +252,7 @@ function Dashboard({ goHome }: { goHome: () => void }) {
     try {
       const response = await fetch(`${API}/handoffs/${encodeURIComponent(activeHandoff.id)}/context?destination=${encodeURIComponent(activeHandoff.destination)}`);
       const payload = await response.json(); if (!response.ok) throw new Error(payload.error?.message ?? 'Could not load this handoff.');
-      observedHandoffStatus.current.set(payload.handoff.id, payload.handoff.status);
+
       setActiveHandoff(payload.handoff); setHandoffItems(payload.items); setHandoffs(prev => prev.map(h => h.id === payload.handoff.id ? payload.handoff : h)); setProjectHandoffs(prev => prev.map(h => h.id === payload.handoff.id ? payload.handoff : h));
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Could not load this handoff.';
@@ -278,7 +281,7 @@ function Dashboard({ goHome }: { goHome: () => void }) {
   return <div className="dashboard">
     <aside className={`sidebar ${showMobileNav ? 'sidebar-open' : ''}`}><div className="sidebar-top"><div className="sidebar-brand"><Wordmark/><button onClick={goHome} aria-label="Return to landing page"><ArrowLeft size={14}/></button></div><div className="workspace-picker"><span className="workspace-avatar">R</span><span><strong>Local workspace</strong><small>Relay AI</small></span><ChevronDown size={14}/></div><div className="side-label">WORKSPACE</div><nav id="dashboard-nav" aria-label="Workspace navigation">{sections.map(s => <button key={s} onClick={() => { setTab(s); setShowMobileNav(false); }} className={tab === s ? 'side-link active' : 'side-link'} aria-current={tab === s ? 'page' : undefined}><span className="side-icon"><SectionGlyph name={s}/></span>{s}{s === 'Handoff studio' && <span className="side-beta">NEW</span>}</button>)}</nav></div><div className="sidebar-bottom"><div className="service-status"><span className={serviceState === 'ok' ? 'status-dot online' : 'status-dot'}/><div><strong>{statusCopy}</strong><small>{serviceState === 'ok' ? '127.0.0.1 · local only' : 'Start the local Relay service'}</small></div></div><button className="sidebar-help" onClick={() => setTab('Settings')}><CircleAlert size={14}/> Service & privacy settings</button></div></aside>
     {showMobileNav && <button className="mobile-scrim" onClick={() => setShowMobileNav(false)} aria-label="Close navigation"/>}
-    <main className="dash-main" id="main-content"><header className="dash-topbar"><button className="dash-menu" onClick={() => setShowMobileNav(true)} aria-label="Open navigation" aria-expanded={showMobileNav} aria-controls="dashboard-nav"><Menu/></button><span className="breadcrumb">Workspace <span>/</span> {tab}</span><div className="topbar-actions"><span className={`connection-label ${serviceState}`}><i/> {serviceState === 'ok' ? 'Connected' : 'Disconnected'}</span><button className="icon-button" onClick={() => void load()} aria-label="Refresh data"><RefreshCw size={15}/></button><span className="user-avatar">R</span></div></header>
+    <main className="dash-main" id="main-content" tabIndex={-1}><header className="dash-topbar"><button className="dash-menu" onClick={() => setShowMobileNav(true)} aria-label="Open navigation" aria-expanded={showMobileNav} aria-controls="dashboard-nav"><Menu/></button><span className="breadcrumb">Workspace <span>/</span> {tab}</span><div className="topbar-actions"><span className={`connection-label ${serviceState}`}><i/> {serviceState === 'ok' ? 'Connected' : 'Disconnected'}</span><button className="icon-button" onClick={() => void load()} aria-label="Refresh data"><RefreshCw size={15}/></button><span className="user-avatar">R</span></div></header>
       <div className="dash-content"><div className="dash-pagehead"><div><span className="eyebrow">RELAY AI / LOCAL WORKSPACE</span><h1>{tab}</h1><p>{tab === 'Overview' ? 'Your projects and their latest continuity state.' : `Manage ${tab.toLowerCase()} for your local projects.`}</p></div><button className="button-primary compact-button" onClick={() => setShowConnect(true)}>Add project <ArrowRight size={14}/></button></div>
         {error && <div className="service-error" role="status"><CircleAlert size={16}/><div><strong>{serviceState === 'offline' ? 'Can’t reach the local Relay service' : 'Request failed'}</strong><span>{error}</span></div><button onClick={() => void load()}>Retry</button></div>}
         {loading ? <div className="dash-loading"><span className="loading-line"/><span className="loading-line short"/><span className="loading-line"/></div> : <>
@@ -304,5 +307,5 @@ export default function App() {
   useEffect(() => { const onHash = () => setDashboard(location.hash === '#dashboard'); window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash); }, []);
   const goDashboard = () => { location.hash = 'dashboard'; window.scrollTo(0, 0); };
   const goHome = () => { location.hash = 'top'; window.scrollTo(0, 0); };
-  return <><a className="skip-link" href="#main-content">Skip to main content</a>{dashboard ? <Dashboard goHome={goHome}/> : <LandingPage goDashboard={goDashboard}/>}</>;
+  return <><a className="skip-link" href="#main-content" onClick={event => { event.preventDefault(); document.getElementById('main-content')?.focus(); }}>Skip to main content</a>{dashboard ? <Dashboard goHome={goHome}/> : <LandingPage goDashboard={goDashboard}/>}</>;
 }

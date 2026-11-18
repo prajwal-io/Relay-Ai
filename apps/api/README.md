@@ -13,7 +13,7 @@ npm run dev --workspace apps/api
 
 Copy `apps/api/.env.example` to `apps/api/.env` as needed. `GROQ_API_KEY` is optional and is read only on the server. `POST /api/v1/projects/:projectId/extract` returns suggested items for review; it does not save them automatically. Submitted context is redacted before an explicit Groq request. If Groq is unavailable, local extraction keeps working. `GET /api/v1/health` reports the selected provider without exposing credentials.
 
-For a Vercel-hosted frontend, keep this API on the user's computer and add the exact frontend URL to `WEB_ORIGINS` in `apps/api/.env` (comma-separated; no wildcards). The API only binds to loopback and rejects non-loopback `Host` headers, unapproved browser origins, cross-site browser fetches, unsupported methods, non-JSON writes, oversized bodies, and request bursts above its limit. See the root `VERCEL_DEPLOYMENT.md` for the full local-first deployment boundary.
+Open the installed dashboard from the Relay tray. The API binds to loopback and rejects non-loopback `Host` headers, unapproved browser origins, cross-site browser fetches, unsupported methods, non-JSON writes, oversized bodies, and request bursts above its limit. See the root `VERCEL_DEPLOYMENT.md` for the public website deployment.
 
 These checks reduce browser-based cross-site requests and accidental network exposure. They do not authenticate a process running as the same user: a local process can call the loopback API directly. Treat this as a single-user desktop service on a trusted machine, not an isolation boundary for untrusted local software or a multi-user server. CORS is an origin filter, not user authentication; only allow a frontend deployment you control.
 

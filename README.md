@@ -69,7 +69,7 @@ The installed OpenCode integration test uses a local mock provider and synthetic
 ## Architecture
 
 ```text
- Web browser / static Vercel frontend
+ Installed dashboard / local Vite development browser
                  │ HTTP (same computer)
                  ▼
        Local Relay API (Node.js + TypeScript) ───── Git inspection
@@ -171,7 +171,7 @@ Configuration is read by the local API from `apps/api/.env`:
 | `GROQ_MODEL` | Extraction model | Example file provides a default |
 | `GROQ_TIMEOUT_MS` | Extraction timeout | Example file provides a default; local extraction is the fallback |
 
-Do not bind the local API to a public network interface. Only add a Vercel origin you control to `WEB_ORIGINS`; CORS is a browser boundary, not process authentication.
+Keep the API bound to loopback. Use the installed dashboard from the tray or the local Vite dashboard during development.
 
 ## Build and test
 
@@ -188,7 +188,7 @@ For a practical contributor guide covering fork setup, running the frontend and 
 
 The frontend can be deployed as a static Vite site on Vercel. The local API, SQLite store, Git inspection, and MCP server stay on the developer's machine. See [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md) before deployment.
 
-A hosted frontend only reaches a local Relay API when it is opened in a browser on the same computer as the running API and that exact frontend origin is allowed. Deploying the frontend does not create a shared or multi-user Relay service. Do not expose the loopback API publicly or place `GROQ_API_KEY` in Vercel frontend variables.
+A hosted frontend provides product information, a simulated walkthrough, and downloads. Open the installed dashboard from the Relay tray to work with local data. Keep `GROQ_API_KEY` on the local API process.
 
 ## Repository map
 
