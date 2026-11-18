@@ -356,11 +356,13 @@ async function pollActivity() {
     }
     lastHandoffs = new Map(handoffs.map(handoff => [handoff.id, handoff.status]));
     const recent = handoffs[0] ? {
+      id: handoffs[0].id,
       title: handoffs[0].title, source: handoffs[0].source, destination: handoffs[0].destination,
       status: handoffs[0].status, verification: handoffs[0].verification,
       itemCount: handoffs[0].itemCount
     } : null;
     currentState = { ...currentState, online: true, projectCount, recent, event: completed ? {
+      id: completed.id,
       title: completed.title, source: completed.source, destination: completed.destination,
       status: completed.status, verification: completed.verification,
       itemCount: completed.itemCount, createdAt: completed.createdAt

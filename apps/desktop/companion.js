@@ -28,7 +28,7 @@ async function expand(value) {
   } else {
     if (workflowOpen) closeWorkflow();
     panel.classList.remove('is-open');
-    const delay = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 180 : 220;
+    const delay = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 220;
     collapseTimer = window.setTimeout(() => {
       if (sequence === expansionSequence) {
         window.relayDesktop.expand(false);
@@ -50,22 +50,48 @@ const workflow = document.querySelector('#switch-workflow');
 const monitor = document.querySelector('#monitor-view');
 const status = document.querySelector('#workflow-status');
 const chatList = document.querySelector('#chat-list');
+const chatSearch = document.querySelector('#chat-search');
 const context = document.querySelector('#chat-context');
 const stages = ['chat-stage', 'review-stage', 'evidence-stage', 'opened-stage'];
-function showStage(id) { stages.forEach(stage => { document.querySelector(`#${stage}`).hidden = stage !== id; }); status.textContent = ''; }
+const stepLabels = document.querySelectorAll('.workflow-steps li');
+function showStage(id) {
+  const index = stages.indexOf(id);
+  stages.forEach((stage, position) => {
+    document.querySelector(`#${stage}`).hidden = position !== index;
+    stepLabels[position].toggleAttribute('data-complete', position < index);
+    if (position === index) stepLabels[position].setAttribute('aria-current', 'step');
+    else stepLabels[position].removeAttribute('aria-current');
+  });
+  status.textContent = '';
+}
+
+chatSearch.addEventListener('input', () => {
+  const query = chatSearch.value.trim().toLocaleLowerCase();
+  let matches = 0;
+  for (const row of chatList.children) {
+    const visible = row.dataset.search.includes(query);
+    row.hidden = !visible;
+    if (visible) matches++;
+  }
+  status.textContent = matches ? `${matches} chat${matches === 1 ? '' : 's'} available.` : 'No chats match your search.';
+});
 function errorMessage(error) { return (error?.message || 'Something went wrong. Please try again.').replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, ''); }
 function closeWorkflow() {
   workflowOpen = false; workflowGeneration++;
   workflow.hidden = true; monitor.hidden = false;
   window.relayDesktop.workflow(false);
+  if (expanded) document.querySelector('#start-switch').focus();
 }
 async function loadChats() {
   const generation = ++workflowGeneration;
-  showStage('chat-stage'); chatList.replaceChildren(); status.textContent = 'Finding local Codex chats…';
+  showStage('chat-stage'); chatList.replaceChildren();
+  chatSearch.value = ''; chatSearch.disabled = true; chatList.setAttribute('aria-busy', 'true');
+  status.textContent = 'Finding local Codex chats…';
   try {
     const result = await window.relayDesktop.listChats();
     if (!workflowOpen || generation !== workflowGeneration) return;
-    status.textContent = result.hasMore ? 'Showing the first 500 chats.' : result.sessions.length ? '' : 'No local Codex chats were found.';
+    chatSearch.disabled = !result.sessions.length;
+    status.textContent = result.hasMore ? 'Showing the first 500 chats.' : result.sessions.length ? '' : 'No local Codex chats found. Start a chat in Codex, then refresh here.';
     for (const chat of result.sessions) {
       const row = document.createElement('button'); row.type = 'button'; row.className = 'chat-row';
       const symbol = document.createElement('span'); symbol.className = 'chat-symbol'; symbol.textContent = 'C';
@@ -75,9 +101,11 @@ async function loadChats() {
       const arrow = document.createElement('span'); arrow.className = 'chat-arrow'; arrow.textContent = '→'; arrow.setAttribute('aria-hidden', 'true');
       copy.append(title, location); row.append(symbol, copy, arrow);
       const listItem = document.createElement('div'); listItem.setAttribute('role', 'listitem');
+      listItem.dataset.search = `${chat.title} ${chat.cwd}`.toLocaleLowerCase();
       row.addEventListener('click', () => readChat(chat.id)); listItem.append(row); chatList.append(listItem);
     }
   } catch (error) { if (workflowOpen && generation === workflowGeneration) status.textContent = errorMessage(error); }
+  finally { if (generation === workflowGeneration) chatList.removeAttribute('aria-busy'); }
 }
 async function readChat(id) {
   const generation = ++workflowGeneration;
@@ -93,18 +121,20 @@ async function readChat(id) {
 }
 document.querySelector('#start-switch').addEventListener('click', async () => {
   workflowOpen = true; monitor.hidden = true; workflow.hidden = false;
+  document.querySelector('#back-monitor').focus();
   await window.relayDesktop.workflow(true); if (workflowOpen) void loadChats();
 });
 document.querySelector('#back-monitor').addEventListener('click', closeWorkflow);
 document.querySelector('#done-switch').addEventListener('click', closeWorkflow);
 document.querySelector('#refresh-chats').addEventListener('click', loadChats);
 document.querySelector('#change-chat').addEventListener('click', loadChats);
-document.querySelector('#edit-context').addEventListener('click', () => showStage('review-stage'));
+document.querySelector('#edit-context').addEventListener('click', () => { showStage('review-stage'); context.focus(); });
 document.querySelector('#prepare-chat').addEventListener('click', async event => {
+  const generation = workflowGeneration;
   const button = event.currentTarget; button.disabled = true; status.textContent = 'Saving the reviewed text locally and checking the repository…';
   try {
     const result = await window.relayDesktop.prepareChat(context.value);
-    if (!workflowOpen) return;
+    if (!workflowOpen || generation !== workflowGeneration) return;
     draft = result; const evidenceList = document.querySelector('#draft-evidence'); evidenceList.replaceChildren();
     for (const evidence of result.evidence || []) {
       const row = document.createElement('div'); row.className = `evidence-row ${evidence.status === 'conflict' ? 'conflict' : ''}`;
@@ -117,18 +147,26 @@ document.querySelector('#prepare-chat').addEventListener('click', async event =>
     document.querySelector('#evidence-note').textContent = conflicts ? 'Resolve the conflicts in the repository and prepare the handoff again.' : 'Repository observations do not verify every chat claim. Approval opens OpenCode, which may send this context to its configured model provider.';
     document.querySelector('#launch-opencode').disabled = conflicts;
     showStage('evidence-stage');
-  } catch (error) { if (workflowOpen) status.textContent = errorMessage(error); }
+    document.querySelector(conflicts ? '#edit-context' : '#launch-opencode').focus();
+  } catch (error) { if (workflowOpen && generation === workflowGeneration) status.textContent = errorMessage(error); }
   finally { button.disabled = false; }
 });
 document.querySelector('#launch-opencode').addEventListener('click', async event => {
   if (!draft) return;
+  const generation = workflowGeneration;
   const button = event.currentTarget; button.disabled = true; status.textContent = 'Approving and opening OpenCode…';
     try {
       const result = await window.relayDesktop.openOpenCode(draft.id);
-      if (workflowOpen && result.opened) showStage('opened-stage');
-      else if (workflowOpen) { status.textContent = 'Approval canceled. Your draft is still available.'; button.disabled = false; }
+      if (!workflowOpen || generation !== workflowGeneration) return;
+      if (result.opened) {
+        document.querySelector('#opened-stage').classList.remove('retrieved');
+        document.querySelector('#retrieval-title').textContent = 'Waiting for retrieval';
+        document.querySelector('#retrieval-copy').textContent = 'OpenCode is opening. If it asks for tool permission, allow Relay retrieval to continue.';
+        showStage('opened-stage');
+        document.querySelector('#retrieval-title').focus();
+      } else { status.textContent = 'Approval canceled. Your draft is still available.'; button.disabled = false; }
     }
-  catch (error) { if (workflowOpen) { status.textContent = errorMessage(error); button.disabled = false; } }
+  catch (error) { if (workflowOpen && generation === workflowGeneration) { status.textContent = errorMessage(error); button.disabled = false; } }
 });
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') expand(false);
@@ -224,6 +262,13 @@ window.relayDesktop.onState(state => {
   document.querySelector('#panel-dot').classList.toggle('online', online);
   document.querySelector('#presence-label').textContent = online ? 'RELAY IS LISTENING LOCALLY' : 'LOCAL SERVICE DISCONNECTED';
   const handoff = state.event || state.recent;
+  const opened = document.querySelector('#opened-stage');
+  if (handoff?.id && handoff.id === draft?.id && handoff.status === 'loaded' && !opened.hidden && !opened.classList.contains('retrieved')) {
+    opened.classList.add('retrieved');
+    document.querySelector('#retrieval-title').textContent = 'Context retrieved';
+    document.querySelector('#retrieval-copy').textContent = 'OpenCode received the approved package. You can review the receipt in the dashboard.';
+    stepLabels[3].setAttribute('data-complete', '');
+  }
   const status = String(handoff?.status || '').toLowerCase();
   const summary = status === 'loaded' ? 'Handoff retrieved' : status === 'approved' ? 'Handoff approved' : status === 'draft' ? 'Draft ready for review' : `${state.projectCount} local project${state.projectCount === 1 ? '' : 's'} · listening`;
   document.querySelector('#capsule-status').textContent = online ? summary : state.notice;
