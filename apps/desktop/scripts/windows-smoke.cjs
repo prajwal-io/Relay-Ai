@@ -49,8 +49,10 @@ async function main() {
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'relay-windows-smoke-'));
   const profile = path.join(scratch, 'Relay AI');
   const project = path.join(scratch, 'fixture');
+  const otherProject = path.join(scratch, 'other');
   await fs.mkdir(profile);
   await fs.mkdir(project);
+  await fs.mkdir(otherProject);
   await fs.writeFile(path.join(profile, 'setup-shown'), '');
   const app = spawn(exe, [`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], {
     cwd: scratch, env: { ...process.env, APPDATA: scratch, LOCALAPPDATA: scratch }, windowsHide: true, stdio: 'ignore',
@@ -80,12 +82,17 @@ async function main() {
     assert.equal(await evaluate(dashboard, 'document.documentElement.scrollWidth <= innerWidth'), true, 'No mobile page overflow');
     await evaluate(dashboard, '[...document.querySelectorAll("button")].find(b => b.innerText.includes("Launch dashboard")).click(); true');
     await until(() => evaluate(dashboard, 'location.hash === "#dashboard" && document.body.textContent.includes("Local service connected")'), 'Website to dashboard');
+    await request('/projects', { name: 'Initially selected project', rootPath: otherProject });
+    await until(() => evaluate(dashboard, 'document.body.textContent.includes("Initially selected project")'), 'Dashboard sees first project');
     const registered = await request('/projects', { name: 'Packaged smoke fixture', rootPath: project });
     const item = await request(`/projects/${registered.id}/memory`, { kind: 'note', source: 'user', content: 'Synthetic release fixture' });
     const draft = await request(`/projects/${registered.id}/handoffs`, { source: 'codex', destination: 'opencode', title, memoryItemIds: [item.id] });
     await until(() => evaluate(dashboard, `document.body.innerText.includes(${JSON.stringify(title)})`), 'Dashboard receives external draft');
     await until(() => evaluate(companion, `document.querySelector("#handoff-title").textContent === ${JSON.stringify(title)}`), 'Companion receives external draft');
-    await request(`/handoffs/${draft.id}/approve`, { includeItemIds: [item.id] });
+    await evaluate(dashboard, `[...document.querySelectorAll(".handoff-row")].find(button => button.textContent.includes(${JSON.stringify(title)})).click(); true`);
+    await until(() => evaluate(dashboard, 'document.body.textContent.includes("Synthetic release fixture")'), 'Review includes saved context');
+    await evaluate(dashboard, '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Approve selected context")).click(); true');
+    await until(async () => (await request(`/handoffs/${draft.id}`)).status === 'approved', 'Dashboard approval');
     const scoped = createHmac('sha256', token).update(`load:${draft.id}`).digest('hex');
     await request(`/handoffs/${draft.id}/load`, { destination: 'opencode' }, scoped);
     await until(() => evaluate(companion, 'document.querySelector("#handoff-meta").textContent.includes("Retrieved by destination")'), 'Companion retrieval');
@@ -94,7 +101,7 @@ async function main() {
     const started = Date.now();
     while (Date.now() - started < soak * 1000) {
       await wait(3000);
-      assert.equal((await request('/activity')).handoffs[0].status, 'loaded');
+      assert.equal((await request('/activity')).handoffs.find(handoff => handoff.id === draft.id)?.status, 'loaded');
       assert.equal(await evaluate(dashboard, 'document.body.textContent.includes("Local service connected")'), true);
     }
     console.log(`Packaged website, dashboard and companion passed sync checks (${soak}s soak).`);

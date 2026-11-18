@@ -257,6 +257,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   }
   if (path[0] === "handoffs" && path[1]) {
     let handoff = loadHandoff(path[1]);
+    if (method === "GET" && path.length === 2) return json(res, 200, handoff, origin);
     if (path.length === 3 && path[2] === "approve" && method === "POST") {
       if (handoff.status !== "draft") return fail(res, 409, "INVALID_HANDOFF_STATE", "Only draft handoffs can be approved", origin);
       if (!(await snapshotIsCurrent(handoff))) return fail(res, 409, "REPOSITORY_CHANGED", "Repository state changed after this handoff was prepared; create and review a new draft", origin);

@@ -69,6 +69,8 @@ test("installation credentials and scoped handoff access are enforced", async ()
   assert.equal((await fetch(`${base}/projects`, { headers })).status, 401);
   assert.equal((await fetch(`${base}/activity`, { headers })).status, 401);
   assert.equal((await scoped(`${draft.id}/approve`)).status, 401);
+  assert.equal((await fetch(`${base}/handoffs/${draft.id}`, { headers })).status, 401);
+  assert.equal((await (await fetch(`${base}/handoffs/${draft.id}`)).json() as any).status, "draft");
   assert.equal((await scoped(`00000000-0000-4000-8000-000000000000/load`)).status, 401);
   assert.equal((await scoped(`${draft.id}/load`)).status, 409);
   assert.equal((await post(`${base}/handoffs/${draft.id}/approve`, {})).status, 200);
