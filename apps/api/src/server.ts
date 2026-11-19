@@ -10,6 +10,7 @@ import { collectRepositoryEvidence, resolveProjectFile, validateRootPath } from 
 import { cloneAndInspectRepository, parsePublicRepository } from "./repository-import.js";
 import type { AgentKind, Evidence, Handoff, HandoffReceipt, HandoffReceiptEntry, MemoryItem, MemoryKind, Project } from "../../../packages/shared/src/contracts.js";
 import { AGENT_IDS, AGENT_REGISTRY } from "../../../packages/shared/src/agents.js";
+import { detectAgent } from "./agent-installations.js";
 import { configuredExtractionProvider, extractContext } from "./intelligence.js";
 
 const API = "/api/v1";
@@ -189,7 +190,8 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   }
 
   if (method === "GET" && path.length === 1 && path[0] === "agents") {
-    return json(res, 200, { agents: AGENT_REGISTRY }, origin);
+    const agents = await Promise.all(AGENT_REGISTRY.map(async agent => ({ ...agent, installation: await detectAgent(agent.id) })));
+    return json(res, 200, { agents }, origin);
   }
 
   if (method === "GET" && path.length === 1 && path[0] === "projects") {
