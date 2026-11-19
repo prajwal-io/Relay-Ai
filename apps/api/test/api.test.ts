@@ -372,3 +372,22 @@ test("explicit handoff items stay project-scoped and tracked changes invalidate 
   assert.equal(staleReceipt.repositoryStatus, "stale", "receipts surface repository drift after retrieval");
   assert.equal(staleReceipt.approvedItems[0].content, item.content, "the receipt preserves the retrieved text even if the repository later changes");
 });
+test("approved source sessions reach only their chosen destination and retain their receipt", async () => {
+  const root = join(temp, "route-matrix");
+  await mkdir(root);
+  const project = await (await post(base + "/projects", { name: "Route matrix", rootPath: root })).json() as any;
+  const item = await (await post(base + "/projects/" + project.id + "/memory", { kind: "task", content: "Finish fixture", source: "user" })).json() as any;
+  for (const [source, destination] of [["codex", "opencode"], ["opencode", "codex"], ["cursor", "kiro-cli"]]) {
+    const draft = await (await post(base + "/projects/" + project.id + "/handoffs", { source, destination, sourceSessionId: "fixture-session", memoryItemIds: [item.id] })).json() as any;
+    const route = base + "/handoffs/" + draft.id;
+    const credential = createHmac("sha256", installationToken).update("load:" + draft.id).digest("hex");
+    const load = (agent: string) => fetch(route + "/load", { method: "POST", headers: { authorization: "Bearer " + credential, "content-type": "application/json" }, body: JSON.stringify({ destination: agent }) });
+    assert.equal((await load(destination)).ok, false);
+    assert.equal((await post(route + "/approve", { includeItemIds: [item.id] })).ok, true);
+    assert.equal((await load(source)).ok, false);
+    assert.equal((await load(destination)).ok, true);
+    assert.equal((await load(destination)).ok, true);
+    const receipt = await (await fetch(route + "/receipt")).json() as any;
+    assert.deepEqual([receipt.source, receipt.destination, receipt.projectId, receipt.sourceSessionId, receipt.retrievalCount], [source, destination, project.id, "fixture-session", 2]);
+  }
+});
