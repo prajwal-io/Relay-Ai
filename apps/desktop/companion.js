@@ -9,6 +9,8 @@ let expansionSequence = 0;
 let workflowOpen = false;
 let workflowGeneration = 0;
 let draft = null;
+let activeHandoffId = '';
+let handoffProgress = null;
 
 async function expand(value) {
   const sequence = ++expansionSequence;
@@ -54,6 +56,8 @@ const chatSearch = document.querySelector('#chat-search');
 const context = document.querySelector('#chat-context');
 const stages = ['chat-stage', 'review-stage', 'evidence-stage', 'opened-stage'];
 const stepLabels = document.querySelectorAll('.workflow-steps li');
+const retryOpenCode = document.querySelector('#retry-opencode');
+const reviewReceipt = document.querySelector('#review-receipt');
 function showStage(id) {
   const index = stages.indexOf(id);
   stages.forEach((stage, position) => {
@@ -64,6 +68,68 @@ function showStage(id) {
   });
   status.textContent = '';
 }
+
+function renderHandoffProgress(progress) {
+  if (!progress) return;
+  const retrieved = progress.phase === 'retrieved' && progress.status === 'loaded';
+  const title = document.querySelector('#retrieval-title');
+  const copy = document.querySelector('#retrieval-copy');
+  const opened = document.querySelector('#opened-stage');
+  opened.classList.toggle('retrieved', retrieved);
+  retryOpenCode.hidden = !(progress.phase === 'error' && progress.retryAvailable);
+  retryOpenCode.disabled = false;
+  reviewReceipt.hidden = !retrieved && !(progress.phase === 'error' && !progress.retryAvailable);
+  reviewReceipt.textContent = retrieved ? 'Open handoff receipt' : 'Open Relay dashboard for recovery';
+  if (retrieved) {
+    title.textContent = 'Context retrieved';
+    copy.textContent = 'OpenCode retrieved the approved package. You can inspect Relay’s receipt in the dashboard.';
+  } else if (progress.phase === 'error') {
+    title.textContent = progress.retryAvailable ? 'OpenCode needs another attempt' : 'Handoff could not continue';
+    copy.textContent = progress.error || (progress.retryAvailable
+      ? 'Relay could not complete the connection. Retry to open OpenCode again.'
+      : 'Relay could not continue this handoff. Open the dashboard for recovery guidance.');
+  } else if (progress.phase === 'starting') {
+    title.textContent = 'Starting OpenCode';
+    copy.textContent = 'Relay is preparing the approved handoff and opening the project.';
+  } else if (progress.phase === 'server-ready') {
+    title.textContent = 'OpenCode is ready';
+    copy.textContent = 'Relay is registering the approved handoff tool for this project.';
+  } else if (progress.phase === 'connecting' || progress.connection === 'connecting' || progress.connection === 'pending') {
+    title.textContent = 'Connecting the handoff';
+    copy.textContent = 'OpenCode is connecting to Relay’s local handoff tool. No context is marked received yet.';
+  } else {
+    title.textContent = 'Waiting for OpenCode';
+    copy.textContent = progress.connection === 'connected'
+      ? 'The Relay tool is connected. Allow it if prompted, then ask OpenCode to retrieve the approved context.'
+      : 'OpenCode launched. Waiting for Relay to confirm its local connection and context retrieval.';
+  }
+  if (retrieved) stepLabels[3].setAttribute('data-complete', '');
+}
+
+retryOpenCode.addEventListener('click', async () => {
+  const handoffId = activeHandoffId;
+  if (!handoffId || !handoffProgress?.retryAvailable) return;
+  retryOpenCode.disabled = true;
+  document.querySelector('#retrieval-title').textContent = 'Retrying OpenCode';
+  document.querySelector('#retrieval-copy').textContent = 'Relay is reopening the same approved handoff.';
+  try {
+    const result = await window.relayDesktop.openOpenCode(handoffId);
+    if (!result.opened) {
+      retryOpenCode.disabled = false;
+      document.querySelector('#retrieval-copy').textContent = 'Retry canceled. The approved package is still available in Relay.';
+    } else document.querySelector('#retrieval-copy').textContent = 'OpenCode relaunched. Waiting for Relay to confirm the connection and context retrieval.';
+  } catch (error) {
+    retryOpenCode.disabled = false;
+    document.querySelector('#retrieval-title').textContent = 'OpenCode needs another attempt';
+    document.querySelector('#retrieval-copy').textContent = errorMessage(error);
+  }
+});
+
+reviewReceipt.addEventListener('click', () => {
+  void window.relayDesktop.openDashboard().catch(error => {
+    document.querySelector('#retrieval-copy').textContent = errorMessage(error);
+  });
+});
 
 chatSearch.addEventListener('input', () => {
   const query = chatSearch.value.trim().toLocaleLowerCase();
@@ -156,17 +222,29 @@ document.querySelector('#launch-opencode').addEventListener('click', async event
   const generation = workflowGeneration;
   const button = event.currentTarget; button.disabled = true; status.textContent = 'Approving and opening OpenCode…';
     try {
+      activeHandoffId = draft.id;
+      handoffProgress = null;
       const result = await window.relayDesktop.openOpenCode(draft.id);
       if (!workflowOpen || generation !== workflowGeneration) return;
       if (result.opened) {
-        document.querySelector('#opened-stage').classList.remove('retrieved');
-        document.querySelector('#retrieval-title').textContent = 'Waiting for retrieval';
-        document.querySelector('#retrieval-copy').textContent = 'OpenCode is opening. If it asks for tool permission, allow Relay retrieval to continue.';
         showStage('opened-stage');
         document.querySelector('#retrieval-title').focus();
-      } else { status.textContent = 'Approval canceled. Your draft is still available.'; button.disabled = false; }
+        if (handoffProgress?.handoffId === activeHandoffId) renderHandoffProgress(handoffProgress);
+        else {
+          document.querySelector('#retrieval-title').textContent = 'OpenCode launched';
+          document.querySelector('#retrieval-copy').textContent = 'Waiting for Relay to confirm the connection and context retrieval.';
+        }
+      } else { activeHandoffId = ''; status.textContent = 'Approval canceled. Your draft is still available.'; button.disabled = false; }
     }
-  catch (error) { if (workflowOpen && generation === workflowGeneration) { status.textContent = errorMessage(error); button.disabled = false; } }
+  catch (error) {
+    if (workflowOpen && generation === workflowGeneration) {
+      if (handoffProgress?.handoffId === activeHandoffId && handoffProgress.phase === 'error') {
+        showStage('opened-stage');
+        renderHandoffProgress(handoffProgress);
+      } else status.textContent = errorMessage(error);
+      button.disabled = false;
+    }
+  }
 });
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') expand(false);
@@ -272,11 +350,18 @@ window.relayDesktop.onState(state => {
   document.querySelector('#presence-label').textContent = online ? 'RELAY IS LISTENING LOCALLY' : 'LOCAL SERVICE DISCONNECTED';
   const handoff = state.event || state.recent;
   const opened = document.querySelector('#opened-stage');
-  if (handoff?.id && handoff.id === draft?.id && handoff.status === 'loaded' && !opened.hidden && !opened.classList.contains('retrieved')) {
-    opened.classList.add('retrieved');
-    document.querySelector('#retrieval-title').textContent = 'Context retrieved';
-    document.querySelector('#retrieval-copy').textContent = 'OpenCode received the approved package. You can review the receipt in the dashboard.';
-    stepLabels[3].setAttribute('data-complete', '');
+  const progress = state.handoffProgress;
+  if (progress && (!activeHandoffId || progress.handoffId === activeHandoffId)) {
+    activeHandoffId = progress.handoffId;
+    handoffProgress = progress;
+    if (!opened.hidden) renderHandoffProgress(progress);
+    else if (workflowOpen && (progress.status === 'approved' || progress.status === 'loaded')) {
+      showStage('opened-stage');
+      renderHandoffProgress(progress);
+    }
+  }
+  if (handoff?.id && handoff.id === activeHandoffId && handoff.status === 'loaded' && !opened.hidden) {
+    renderHandoffProgress({ handoffId: handoff.id, status: 'loaded', phase: 'retrieved', connection: 'connected', retryAvailable: false });
   }
   const status = String(handoff?.status || '').toLowerCase();
   const summary = status === 'loaded' ? 'Handoff retrieved' : status === 'approved' ? 'Handoff approved' : status === 'draft' ? 'Draft ready for review' : `${state.projectCount} local project${state.projectCount === 1 ? '' : 's'} · listening`;
