@@ -10,10 +10,12 @@ test('OpenCode bridge attaches a native, handoff-scoped Relay MCP tool', async (
   child.exitCode = null;
   child.kill = () => { child.exitCode = 0; child.emit('exit', 0, null); return true; };
   const calls = [];
+  const progress = [];
   const bridge = await startBridge({
     executable: 'opencode-fixture', node: 'node-fixture', root: 'C:/relay', projectPath: 'C:/work/project',
     handoffId: 'approved-handoff', apiBase: 'http://127.0.0.1:4317/api/v1',
     allocatePort: async () => 43123,
+    onProgress: (phase, connection) => progress.push([phase, connection]),
     spawnProcess: (executable, args, options) => { spawned = { executable, args, options }; return child; },
     fetchImpl: async (input, options = {}) => {
       const url = new URL(input);
@@ -38,9 +40,17 @@ test('OpenCode bridge attaches a native, handoff-scoped Relay MCP tool', async (
     assert.deepEqual(registration.environment, { RELAY_API_URL: 'http://127.0.0.1:4317/api/v1', RELAY_SCOPED_HANDOFF_ID: 'approved-handoff' });
     assert.ok(calls.some(call => call.url === '/api/info'));
     assert.ok(calls.some(call => call.url === '/api/mcp'));
+    assert.deepEqual(progress, [
+      ['starting', 'pending'],
+      ['server-ready', 'connecting'],
+      ['connecting', 'connecting'],
+      ['connecting', 'connected'],
+    ]);
+    assert.equal(bridge.isRunning(), true);
   } finally {
     await bridge.stop();
   }
+  assert.equal(bridge.isRunning(), false);
 });
 
 test('packaged OpenCode bridge launches Relay MCP through the bundled Electron runtime', async () => {

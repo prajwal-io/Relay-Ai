@@ -15,6 +15,7 @@ electronVersion: 45.3.2
 files:
   - "**/*"
 win:
+  icon: assets/relay.ico
   target:
     - target: nsis
       arch: [x64]

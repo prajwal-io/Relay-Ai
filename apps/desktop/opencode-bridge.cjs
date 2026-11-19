@@ -14,7 +14,7 @@ async function freePort() {
 
 // The runtime MCP API is experimental. Fail closed if this OpenCode version
 // cannot connect; never silently claim that a package reached the assistant.
-async function startBridge({ executable, node, root, projectPath, handoffId, apiBase, accessToken, packaged = false, runtimePath = process.execPath, mcpEntry, spawnProcess = spawn, fetchImpl = fetch, allocatePort = freePort }) {
+async function startBridge({ executable, node, root, projectPath, handoffId, apiBase, accessToken, packaged = false, runtimePath = process.execPath, mcpEntry, spawnProcess = spawn, fetchImpl = fetch, allocatePort = freePort, onProgress = () => {} }) {
   const port = await allocatePort();
   const password = crypto.randomBytes(32).toString('hex');
   const base = `http://127.0.0.1:${port}`;
@@ -23,6 +23,7 @@ async function startBridge({ executable, node, root, projectPath, handoffId, api
   // the desktop launches, even if the server's default location differs.
   const location = `?location[directory]=${encodeURIComponent(projectPath)}`;
   const authorization = `Basic ${Buffer.from(`opencode:${password}`).toString('base64')}`;
+  onProgress('starting', 'pending');
   const child = spawnProcess(executable, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
     cwd: projectPath, env: { ...process.env, OPENCODE_PASSWORD: password }, windowsHide: true, stdio: 'ignore',
   });
@@ -49,6 +50,7 @@ async function startBridge({ executable, node, root, projectPath, handoffId, api
       await pause(250);
     }
     if (!ready) throw new Error('Could not start the authenticated OpenCode service.');
+    onProgress('server-ready', 'connecting');
     const mcpCommand = packaged
       ? [runtimePath, mcpEntry]
       : [node, path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'), path.join(root, 'apps', 'mcp', 'src', 'index.ts')];
@@ -64,6 +66,7 @@ async function startBridge({ executable, node, root, projectPath, handoffId, api
       body: JSON.stringify({ config: { type: 'local', codemode: false, command: mcpCommand, environment } }),
     });
     if (!result.ok) throw new Error(`OpenCode could not register the handoff MCP (HTTP ${result.status}).`);
+    onProgress('connecting', 'connecting');
     let connected = false;
     for (let i = 0; i < 40 && !exited; i++) {
       const response = await request(`/api/mcp${location}`);
@@ -75,7 +78,8 @@ async function startBridge({ executable, node, root, projectPath, handoffId, api
       await pause(500);
     }
     if (!connected) throw new Error('OpenCode did not connect to the handoff MCP in time.');
-    return { base, password, stop };
+    onProgress('connecting', 'connected');
+    return { base, password, stop, isRunning: () => !exited };
   } catch (error) {
     await stop();
     throw error;
