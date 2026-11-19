@@ -148,6 +148,7 @@
 @media(max-width:760px){.relay-header .header-actions{gap:5px;margin-left:auto;margin-right:8px}.relay-header .header-signin,.relay-header .header-dashboard{padding:0 5px;font-size:10px}.relay-header .header-launch{padding:0 9px;font-size:10px}.repo-start-section{grid-template-columns:1fr;padding:60px 22px;gap:28px}.repo-start-section h2{font-size:clamp(42px,11vw,58px)}.auth-dialog{padding:30px 24px}}
 @media(max-width:390px){.relay-header .header-dashboard{display:none}.relay-header .header-actions{margin-right:5px}.relay-header .header-launch{font-size:9px;padding:0 7px}.relay-header .header-signin{font-size:10px}}
 @media(prefers-reduced-motion:reduce){.auth-dialog{animation:none}}
+.release-status{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin:13px 0 0;color:var(--relay-muted);font-size:12px;line-height:1.4}.release-status span{padding:5px 7px;border:1px solid #edd8b8;background:#fff6e9;color:#8a5d1f;font:600 9px "Geist Mono",ui-monospace,monospace;letter-spacing:.04em}
 .relay-stage .stage-live-dot { animation: none; }
 .relay-stage .stage-controls { margin-top: 14px; padding: 12px 0; border-block: 1px solid #ffffff45; }
 .stage-steps { display: flex; gap: 16px; color: #e7eeff; font-size: 11px; }
