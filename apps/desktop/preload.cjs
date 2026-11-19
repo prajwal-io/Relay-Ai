@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('relayDesktop', {
   isDesktopApp: true,
+  exportReceiver: id => ipcRenderer.invoke('relay:export-receiver', id),
   expand: value => ipcRenderer.invoke('relay:expand', value),
   workflow: value => ipcRenderer.invoke('relay:workflow', value),
   listChats: () => ipcRenderer.invoke('relay:chats'),

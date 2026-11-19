@@ -562,6 +562,32 @@ handle('relay:read-chat', async (_event, id) => {
 });
 handle('relay:prepare-chat', (_event, text) => prepareChatDraft(text));
 handle('relay:open-opencode', (_event, id, mode) => approveAndOpen(id, mode), true);
+handle('relay:export-receiver', async (_event, id) => {
+  if (!app.isPackaged || typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id)) throw new Error('Select an approved package in the installed Relay dashboard.');
+  const handoff = await apiRequest('/handoffs/' + id);
+  if (handoff.status !== 'approved') throw new Error('Review and approve the package first.');
+  const destination = handoff.destination;
+  const name = 'relay_' + id.replaceAll('-', '');
+  const result = await dialog.showSaveDialog(dashboardWindow || widget, {
+    title: 'Save MCP setup for ' + destination, defaultPath: name + '-setup.txt',
+  });
+  if (result.canceled || !result.filePath) return { saved: false };
+  const dir = path.join(app.getPath('userData'), 'receiver-credentials');
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const envFile = path.join(dir, id + '.env');
+  const args = ['--env-file=' + envFile, path.join(process.resourcesPath, 'app.asar.unpacked', 'mcp', 'index.cjs')];
+  const env = { ELECTRON_RUN_AS_NODE: '1' };
+  const server = { command: process.execPath, args, env };
+  const snippet = destination === 'codex'
+    ? '[mcp_servers.' + name + ']\ncommand = ' + JSON.stringify(server.command) + '\nargs = ' + JSON.stringify(args) + '\nenv = { ELECTRON_RUN_AS_NODE = "1" }'
+    : JSON.stringify({ mcpServers: { [name]: server } }, null, 2);
+  fs.writeFileSync(envFile, [
+    'RELAY_API_URL=' + apiBase, 'RELAY_SCOPED_HANDOFF_ID=' + id, 'RELAY_SCOPED_DESTINATION=' + destination,
+    'RELAY_MCP_ACCESS_TOKEN=' + createHmac('sha256', installationToken).update('load:' + id).digest('hex'),
+  ].join('\n'), { mode: 0o600 });
+  fs.writeFileSync(result.filePath, 'Merge this entry into your personal ' + destination + ' MCP configuration. Keep Relay running. Reload the client, open your project, and ask it to call relay_load_approved_handoff. Allow the request if prompted.\n\n' + snippet + '\n', { mode: 0o600 });
+  return { saved: true, path: result.filePath };
+}, true);
 handle('relay:move-by', (_event, dx, dy) => {
   if (!widget || widget.isDestroyed()) return;
   if (!Number.isFinite(dx) || !Number.isFinite(dy) || Math.abs(dx) > 120 || Math.abs(dy) > 120) return;
