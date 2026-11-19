@@ -20,6 +20,7 @@ copy(path.join(desktopRoot, 'assets'), path.join(stage, 'assets'));
 copy(path.join(root, 'apps', 'api', '.env.example'), path.join(stage, 'api.env.example'));
 
 for (const [entry, outfile] of [
+  [path.join(desktopRoot, 'opencode-desktop.cjs'), path.join(stage, 'opencode-desktop.cjs')],
   [path.join(root, 'apps', 'api', 'src', 'server.ts'), path.join(stage, 'api', 'server.cjs')],
   [path.join(root, 'apps', 'api', 'src', 'database-copy.ts'), path.join(stage, 'api', 'database-copy.cjs')],
   [path.join(root, 'apps', 'mcp', 'src', 'index.ts'), path.join(stage, 'mcp', 'index.cjs')],
