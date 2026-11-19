@@ -54,9 +54,15 @@ async function main() {
   await fs.mkdir(project);
   await fs.mkdir(otherProject);
   await fs.writeFile(path.join(profile, 'setup-shown'), '');
-  const app = spawn(exe, [`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], {
+  const launch = () => spawn(exe, [`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], {
     cwd: scratch, env: { ...process.env, APPDATA: scratch, LOCALAPPDATA: scratch }, windowsHide: true, stdio: 'ignore',
   });
+  let app = launch();
+  const stop = async () => {
+    if (!app.pid || app.exitCode !== null) return;
+    try { execFileSync(path.join(process.env.SystemRoot, 'System32/taskkill.exe'), ['/PID', String(app.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); }
+    catch { app.kill(); }
+  };
   try {
     const port = await until(async () => Number((await fs.readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split(/\r?\n/)[0]), 'Electron startup');
     const pages = async () => await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
@@ -77,7 +83,14 @@ async function main() {
     await until(() => evaluate(dashboard, 'document.body.textContent.includes("Local service connected")'), 'Authenticated dashboard');
     assert.equal(await evaluate(dashboard, 'document.querySelector(".skip-link").click(); document.activeElement.id + location.hash'), 'main-content#dashboard');
     await evaluate(dashboard, 'location.hash = "top"; true');
-    await until(() => evaluate(dashboard, 'Boolean([...document.links].find(a => a.innerText.includes("Download Relay AI") && a.href.endsWith("/prajwal-io/Relay-Ai/releases")))'), 'Website download link');
+    const downloadBefore = await evaluate(dashboard, 'location.href');
+    assert.equal(await evaluate(dashboard, 'Boolean([...document.querySelectorAll("button")].find(button => /get relay|download relay/i.test(button.innerText)))'), true, 'The website exposes a download action');
+    await evaluate(dashboard, '[...document.querySelectorAll("button")].find(button => /get relay|download relay/i.test(button.innerText)).click(); true');
+    await until(() => evaluate(dashboard, 'Boolean(document.querySelector("[role=dialog][aria-modal=true]"))'), 'Website download sign-in gate');
+    const authGate = await evaluate(dashboard, '({ hasEmailInput: Boolean(document.querySelector("[role=dialog] input[type=email]")), text: document.querySelector("[role=dialog]").innerText })');
+    assert.match(authGate.text, /sign in|email|not published|release/i, 'The gate explains how downloads are accessed');
+    assert.ok(authGate.hasEmailInput || /email sign-in is not enabled/i.test(authGate.text), 'The download gate offers email sign-in or clearly reports missing Supabase setup');
+    assert.equal(await evaluate(dashboard, 'location.href'), downloadBefore, 'An unauthenticated click does not navigate directly to release files');
     await devtools(dashboard, 'Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     assert.equal(await evaluate(dashboard, 'document.documentElement.scrollWidth <= innerWidth'), true, 'No mobile page overflow');
     await evaluate(dashboard, '[...document.querySelectorAll("button")].find(b => b.innerText.includes("Launch dashboard")).click(); true');
@@ -98,6 +111,19 @@ async function main() {
     await until(() => evaluate(companion, 'document.querySelector("#handoff-meta").textContent.includes("Retrieved by destination")'), 'Companion retrieval');
     const receipt = await request(`/handoffs/${draft.id}/receipt`);
     assert.equal(receipt.approvedItems[0].content, item.content);
+    assert.equal(receipt.retrievalCount, 1, 'The receipt records the actual retrieval');
+
+    // Verify user data lives in the installation-scoped profile and survives a
+    // full Electron + local API restart, rather than only surviving in memory.
+    await stop();
+    await fs.rm(path.join(profile, 'DevToolsActivePort'), { force: true });
+    app = launch();
+    const restartedPort = await until(async () => Number((await fs.readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split(/\r?\n/)[0]), 'Electron restart');
+    const restartedPages = async () => await (await fetch(`http://127.0.0.1:${restartedPort}/json/list`)).json();
+    const restartedDashboard = await until(async () => (await restartedPages()).find(page => page.url.endsWith('/#dashboard')), 'Dashboard after restart');
+    await until(() => evaluate(restartedDashboard, 'document.body.textContent.includes("Local service connected")'), 'Local service after restart');
+    assert.equal((await request(`/handoffs/${draft.id}`)).status, 'loaded', 'Handoff state persists across restart');
+    assert.equal((await request(`/projects/${registered.id}/memory`)).some(entry => entry.id === item.id), true, 'Project memory persists across restart');
     const started = Date.now();
     while (Date.now() - started < soak * 1000) {
       await wait(3000);
@@ -106,10 +132,7 @@ async function main() {
     }
     console.log(`Packaged website, dashboard and companion passed sync checks (${soak}s soak).`);
   } finally {
-    if (app.pid && app.exitCode === null) {
-      try { execFileSync(path.join(process.env.SystemRoot, 'System32/taskkill.exe'), ['/PID', String(app.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); }
-      catch { app.kill(); }
-    }
+    await stop();
   }
 }
 
