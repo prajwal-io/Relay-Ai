@@ -63,7 +63,7 @@ test("MCP process answers initialize on stdout without requiring the Relay API",
   }
 });
 
-test("desktop-scoped MCP exposes only its approved OpenCode package", async () => {
+test("desktop-scoped MCP exposes only its approved destination-scoped package", async () => {
   let observedPath = "";
   let observedBody = "";
   const api = createServer((request, response) => {
@@ -77,7 +77,7 @@ test("desktop-scoped MCP exposes only its approved OpenCode package", async () =
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
   const child = spawn(process.execPath, ["--import", "tsx", resolve(repoRoot, "apps/mcp/src/index.ts")], {
     cwd: repoRoot, stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, RELAY_API_URL: `http://127.0.0.1:${address.port}/api/v1`, RELAY_SCOPED_HANDOFF_ID: "fixture-id" },
+    env: { ...process.env, RELAY_API_URL: `http://127.0.0.1:${address.port}/api/v1`, RELAY_SCOPED_HANDOFF_ID: "fixture-id", RELAY_SCOPED_DESTINATION: "kiro-cli" },
   });
   let buffer = "";
   const responses = new Map<number, any>();
@@ -100,7 +100,7 @@ test("desktop-scoped MCP exposes only its approved OpenCode package", async () =
     const response = await call(3, "tools/call", { name: "relay_load_approved_handoff", arguments: {} });
     assert.equal(response.result.isError, undefined);
     assert.equal(observedPath, "/api/v1/handoffs/fixture-id/load");
-    assert.deepEqual(JSON.parse(observedBody), { destination: "opencode" });
+    assert.deepEqual(JSON.parse(observedBody), { destination: "kiro-cli" });
   } finally {
     child.stdin.end(); if (child.exitCode === null) child.kill();
     await Promise.race([once(child, "close"), delay(1000)]);
