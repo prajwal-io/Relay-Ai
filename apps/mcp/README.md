@@ -22,7 +22,7 @@ The API must be running at `http://127.0.0.1:4317/api/v1` (the default) and a pr
 npm run mcp --workspace @relay-ai/mcp
 ```
 
-Set `RELAY_API_URL` to change the local API URL. Remote API URLs are rejected unless `RELAY_ALLOW_REMOTE_API=1` is also set; that opt-in can send project context over the configured network. The MCP process writes diagnostics only to stderr because stdout carries MCP JSON-RPC.
+Set `RELAY_API_URL` to change the local API URL. Remote API URLs are rejected unless `RELAY_ALLOW_REMOTE_API=1` is also set; remote connections require HTTPS and `RELAY_MCP_ACCESS_TOKEN`. That opt-in can send project context over the configured network. In source development, the MCP process reads the local API's generated development token; the packaged desktop passes a handoff-scoped credential. The MCP process writes diagnostics only to stderr because stdout carries MCP JSON-RPC.
 
 ## Host configuration
 

@@ -1,9 +1,47 @@
 import { execFile } from "node:child_process";
-import { access, lstat, readFile, rm } from "node:fs/promises";
+import { access, lstat, readdir, readFile, rm } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
+const MAX_CLONE_BYTES = 250 * 1024 * 1024;
+
+async function directoryBytes(path: string): Promise<number> {
+  let bytes = 0;
+  for (const entry of await readdir(path, { withFileTypes: true })) {
+    const target = join(path, entry.name);
+    if (entry.isDirectory()) bytes += await directoryBytes(target);
+    else if (entry.isFile()) bytes += (await lstat(target)).size;
+  }
+  return bytes;
+}
+
+async function cloneLimited(repositoryUrl: string, target: string) {
+  const child = spawn("git", ["-c", "http.followRedirects=false", "clone", "--depth=1", "--filter=blob:limit=2m", repositoryUrl, target], {
+    windowsHide: true, stdio: "ignore", env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1", GIT_LFS_SKIP_SMUDGE: "1" },
+  });
+  let reason: "timeout" | "size" | undefined;
+  let finished = false;
+  const timeout = setTimeout(() => { reason = "timeout"; child.kill(); }, 90_000);
+  const monitor = (async () => {
+    while (!finished) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      try { if (await directoryBytes(target) > MAX_CLONE_BYTES) { reason = "size"; child.kill(); return; } }
+      catch { /* Clone may not have created its directory yet. */ }
+    }
+  })();
+  try {
+    const code = await new Promise<number | null>((resolve, reject) => {
+      child.once("error", error => { finished = true; reject(error); });
+      child.once("close", value => { finished = true; resolve(value); });
+    });
+    await monitor;
+    if (reason === "timeout") throw Object.assign(new Error("timeout"), { name: "TimeoutError" });
+    if (reason === "size") throw Object.assign(new Error("size"), { code: "REPOSITORY_TOO_LARGE" });
+    if (code !== 0) throw new Error(`git clone exited with status ${code}`);
+  } finally { clearTimeout(timeout); }
+}
 
 export function parsePublicRepository(input: unknown): { url: string; name: string } {
   if (typeof input !== "string" || input.length > 500) throw new Error("Paste a public GitHub or GitLab repository URL.");
@@ -30,7 +68,8 @@ export function parsePublicRepository(input: unknown): { url: string; name: stri
 async function readSmallFile(root: string, file: string, maxBytes: number): Promise<string> {
   try {
     const target = join(root, file);
-    if (!(await lstat(target)).isFile()) return "";
+    const metadata = await lstat(target);
+    if (!metadata.isFile() || metadata.size > maxBytes) return "";
     const content = await readFile(target, "utf8");
     return Buffer.byteLength(content) <= maxBytes ? content : content.slice(0, maxBytes);
   } catch { return ""; }
@@ -38,10 +77,7 @@ async function readSmallFile(root: string, file: string, maxBytes: number): Prom
 
 export async function cloneAndInspectRepository(repositoryUrl: string, target: string) {
   try {
-    await exec("git", ["-c", "http.followRedirects=false", "clone", "--depth=1", repositoryUrl, target], {
-      timeout: 90_000, maxBuffer: 1_000_000, windowsHide: true,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1", GIT_LFS_SKIP_SMUDGE: "1" },
-    });
+    await cloneLimited(repositoryUrl, target);
     await access(join(target, ".git"));
     const [readme, packageJson, gitFiles] = await Promise.all([
       readSmallFile(target, "README.md", 16_000),
@@ -63,7 +99,9 @@ export async function cloneAndInspectRepository(repositoryUrl: string, target: s
     };
   } catch (error) {
     await rm(target, { recursive: true, force: true }).catch(() => {});
-    const message = error instanceof Error && error.name === "TimeoutError"
+    const message = (error as any)?.code === "REPOSITORY_TOO_LARGE"
+      ? "That repository exceeds Relay’s 250 MB import limit. Choose a smaller repository."
+      : error instanceof Error && error.name === "TimeoutError"
       ? "That repository took too long to download. Try again on a faster connection or choose a smaller repository."
       : "Could not download this repository. Check that the URL is public and Git is installed, then try again.";
     throw Object.assign(new Error(message), { status: 400, code: "REPOSITORY_IMPORT_FAILED" });

@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createReadStream, readFileSync, writeFileSync } from "node:fs";
 import { lstat, mkdir, readlink, realpath, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
@@ -15,7 +15,21 @@ const API = "/api/v1";
 const exec = promisify(execFile);
 const PORT = Number(process.env.PORT ?? 4317);
 const HOST = process.env.HOST ?? "127.0.0.1";
-const installationToken = process.env.RELAY_INSTALLATION_TOKEN;
+const developmentTokenPath = join(dataDirectory, "relay-development.token");
+function getDevelopmentToken() {
+  const read = () => readFileSync(developmentTokenPath, "utf8").trim();
+  try { const existing = read(); if (/^[a-f0-9]{64}$/.test(existing)) return existing; } catch { /* First start. */ }
+  const generated = randomBytes(32).toString("hex");
+  try { writeFileSync(developmentTokenPath, generated, { mode: 0o600, flag: "wx" }); return generated; }
+  catch {
+    const existing = read();
+    if (/^[a-f0-9]{64}$/.test(existing)) return existing;
+    throw new Error("Relay's development API credential is invalid. Remove relay-development.token and restart.");
+  }
+}
+const configuredToken = process.env.RELAY_INSTALLATION_TOKEN;
+if (configuredToken && !/^[a-f0-9]{64}$/.test(configuredToken)) throw new Error("RELAY_INSTALLATION_TOKEN must be 64 lowercase hexadecimal characters.");
+const installationToken = configuredToken || getDevelopmentToken();
 const matchesToken = (received: string, expected: string) => {
   const a = Buffer.from(received);
   const b = Buffer.from(expected);
@@ -37,6 +51,8 @@ const allowedOrigins = new Set(
 );
 const agentKinds = new Set<AgentKind>(["opencode", "codex", "other"]);
 const memoryKinds = new Set<MemoryKind>(["task", "decision", "file", "issue", "note"]);
+let activeRepositoryImports = 0;
+const activeRepositoryUrls = new Set<string>();
 
 function json(res: ServerResponse, status: number, payload: unknown, origin?: string | null) {
   res.writeHead(status, {
@@ -192,12 +208,16 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     catch (error) { return fail(res, 400, "INVALID_REPOSITORY_URL", error instanceof Error ? error.message : "Paste a public GitHub or GitLab repository URL.", origin); }
     const existing = db.prepare("SELECT * FROM projects WHERE repository=?").get(source.url) as any;
     if (existing) return json(res, 200, { project: projectFrom(existing), alreadyAdded: true }, origin);
+    if (activeRepositoryImports >= 2) return fail(res, 429, "IMPORT_BUSY", "Two repository imports are already running. Try again in a moment.", origin);
+    if (activeRepositoryUrls.has(source.url)) return fail(res, 409, "IMPORT_IN_PROGRESS", "That repository is already being added on this computer.", origin);
     const destination = join(dataDirectory, "repositories", `${source.name.slice(0, 48)}-${randomUUID().slice(0, 8)}`);
-    await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
-    let inspection: Awaited<ReturnType<typeof cloneAndInspectRepository>>;
-    try { inspection = await cloneAndInspectRepository(source.url, destination); }
-    catch (error) { return fail(res, 400, (error as any).code ?? "REPOSITORY_IMPORT_FAILED", error instanceof Error ? error.message : "Could not download this repository.", origin); }
+    activeRepositoryImports++;
+    activeRepositoryUrls.add(source.url);
     try {
+      await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+      let inspection: Awaited<ReturnType<typeof cloneAndInspectRepository>>;
+      try { inspection = await cloneAndInspectRepository(source.url, destination); }
+      catch (error) { return fail(res, 400, (error as any).code ?? "REPOSITORY_IMPORT_FAILED", error instanceof Error ? error.message : "Could not download this repository.", origin); }
       const rootPath = await validateRootPath(destination);
       const now = new Date().toISOString();
       const id = randomUUID();
@@ -207,7 +227,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       await rm(destination, { recursive: true, force: true }).catch(() => {});
       if (String((error as any)?.message).includes("UNIQUE")) return fail(res, 409, "PROJECT_EXISTS", "That repository is already on this computer.", origin);
       throw error;
-    }
+    } finally { activeRepositoryImports--; activeRepositoryUrls.delete(source.url); }
   }
   if (path[0] === "projects" && path[1] && path.length === 2 && method === "GET") return json(res, 200, loadProject(path[1]), origin);
   if (path[0] === "projects" && path[1] && path[2] === "memory") {
@@ -315,8 +335,8 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         summary: selectedItems.length ? selectedItems.slice(0, 6).map((item) => `• ${item.content}`).join("\n") : "No saved project context matched this handoff yet.",
       };
       handoff = { ...handoff, status: "approved", approvedAt: new Date().toISOString() };
-      const update = db.prepare("UPDATE handoffs SET memory_ids_json=?,status=?,approved_at=? WHERE id=? AND status='draft'")
-        .run(JSON.stringify(handoff.memoryItemIds), handoff.status, handoff.approvedAt!, handoff.id);
+      const update = db.prepare("UPDATE handoffs SET summary=?,memory_ids_json=?,evidence_json=?,verification=?,status=?,approved_at=? WHERE id=? AND status='draft'")
+        .run(handoff.summary, JSON.stringify(handoff.memoryItemIds), JSON.stringify(handoff.evidence), handoff.verification, handoff.status, handoff.approvedAt!, handoff.id);
       if (!update.changes) return fail(res, 409, "INVALID_HANDOFF_STATE", "Only draft handoffs can be approved", origin);
       return json(res, 200, handoff, origin);
     }

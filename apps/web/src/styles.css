@@ -111,6 +111,7 @@
 @media(max-width:700px){.dashboard .handoff-form{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard .handoff-form label{min-width:0}.dashboard .handoff-form input,.dashboard .handoff-form select{width:100%;min-width:0;max-width:100%}}
 
 /* Account-gated release entry and a current, concrete repository onboarding story. */
+.account-sync-preview{display:grid;gap:12px;max-height:340px;overflow:auto;margin-top:14px;padding:14px;background:#f0f1ed;border:1px solid #e1e4e0;border-radius:10px}.account-sync-preview section{display:grid;gap:7px}.account-sync-preview section+section{padding-top:12px;border-top:1px solid #e1e4e0}.account-sync-preview strong{color:#171b24}.account-sync-preview small,.account-sync-preview p span{color:#68717d}.account-sync-preview p{display:grid;gap:3px;margin:0;padding:8px 10px;background:#f8f8f5;border-radius:6px;color:#333b48;overflow-wrap:anywhere}.account-sync-preview p span{font:10px/1.4 ui-monospace,monospace;text-transform:uppercase}
 .relay-header .header-actions{gap:12px}
 .header-signin,.header-dashboard{min-height:38px;padding:0 8px;border:0;background:transparent;color:#3d4651;font-size:12px;font-weight:580;cursor:pointer}
 .header-signin:hover,.header-dashboard:hover{color:var(--relay-blue)}

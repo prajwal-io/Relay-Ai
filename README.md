@@ -32,7 +32,7 @@ A receipt proves that Relay returned a particular package. It does **not** prove
 - Small engineering teams that need to inspect and manually share a handoff record.
 - Developers evaluating MCP-compatible assistants who want context transfer to remain explicit and reviewable.
 
-Relay is a laptop/desktop product. Local SQLite remains the default. Optional Supabase email sign-in is used by the website's download flow; signed-in users can also save a one-way backup of project names, public repository links, and saved memory. Local folder paths and source files are not uploaded. Team workspaces and shared handoffs are not included.
+Relay is a laptop/desktop product. Local SQLite remains the default. Optional Supabase email sign-in is used by the website's download flow; signed-in users can review a redacted snapshot before saving project names, public repository links, and saved memory. Source files and registered local folder paths are not uploaded; common absolute paths and credential patterns are redacted from memory text, but review the preview before saving. Team workspaces and shared handoffs are not included.
 
 ## Real-world workflows
 
@@ -90,7 +90,7 @@ The installed OpenCode integration test uses a local mock provider and synthetic
              └── approved, scoped handoff ── OpenCode MCP service on loopback
 ```
 
-The API owns project and handoff state, SQLite access, repository checks, and optional extraction. The MCP server is a local stdio client of the API; it does not access SQLite directly. The Electron companion is a separate process and can show local activity, review a selected Codex chat, and launch the destination workflow.
+The API owns project and handoff state, SQLite access, repository checks, and optional extraction. Development mode creates a local API credential with owner-only file permissions where supported; Vite and the source MCP command pass it automatically. Other processes running as the same OS user can still access that credential and local project data. The MCP server is a local stdio client of the API; it does not access SQLite directly. The Electron companion is a separate process and can show local activity, review a selected Codex chat, and launch the destination workflow.
 
 ### Handoff lifecycle
 

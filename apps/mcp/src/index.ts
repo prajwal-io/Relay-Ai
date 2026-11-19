@@ -1,5 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { z } from "zod";
 import type { Evidence, Handoff, MemoryItem, Project } from "../../../packages/shared/src/index.js";
 
@@ -20,12 +22,14 @@ function resolveApiBase(): URL {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("RELAY_API_URL must use HTTP or HTTPS");
   }
+  if (!loopback && url.protocol !== "https:") throw new Error("Remote Relay APIs require HTTPS.");
+  if (!loopback && !process.env.RELAY_MCP_ACCESS_TOKEN) throw new Error("Remote Relay APIs require RELAY_MCP_ACCESS_TOKEN.");
   return new URL(`${url.toString().replace(/\/$/, "")}/`);
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const url = new URL(path.replace(/^\//, ""), apiBase);
-  const token = process.env.RELAY_MCP_ACCESS_TOKEN;
+  const token = process.env.RELAY_MCP_ACCESS_TOKEN ?? readDevelopmentToken();
   const response = await fetch(url, {
     ...init,
     redirect: "error",
@@ -46,6 +50,15 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(error || `Relay API returned HTTP ${response.status}`);
   }
   return body as T;
+}
+
+function readDevelopmentToken(): string | undefined {
+  if (!["localhost", "127.0.0.1", "[::1]"].includes(apiBase.hostname)) return undefined;
+  try {
+    const token = readFileSync(resolve(process.cwd(), "../api/data/relay-development.token"), "utf8").trim();
+    return /^[a-f0-9]{64}$/.test(token) ? token : undefined;
+  }
+  catch { return undefined; }
 }
 
 function jsonResult(value: unknown) {
