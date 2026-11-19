@@ -77,6 +77,20 @@ test("installation credentials and scoped handoff access are enforced", async ()
   assert.equal((await scoped(`${draft.id}/load`)).status, 200);
 });
 
+test("agent registry is discoverable and API handoffs accept canonical agent IDs", async () => {
+  const registry = await (await fetch(`${base}/agents`)).json() as any;
+  assert.deepEqual(registry.agents.map((agent: any) => agent.id), ["codex", "opencode", "kiro", "kiro-cli", "cursor", "antigravity", "freebuff"]);
+  const root = join(temp, "generic-agents");
+  await mkdir(root);
+  const project = await (await post(`${base}/projects`, { name: "Generic agents", rootPath: root })).json() as any;
+  const draft = await post(`${base}/projects/${project.id}/handoffs`, { source: "cursor", destination: "kiro-cli" });
+  assert.equal(draft.status, 201);
+  const handoff = await draft.json() as any;
+  assert.equal(handoff.source, "cursor");
+  assert.equal(handoff.destination, "kiro-cli");
+  assert.equal((await post(`${base}/projects/${project.id}/handoffs`, { source: "freebuff", destination: "freebuff" })).status, 400);
+});
+
 test("activity is global, bounded, and promotes recently retrieved packages", async () => {
   const fixtures = [];
   for (let index = 0; index < 24; index++) {

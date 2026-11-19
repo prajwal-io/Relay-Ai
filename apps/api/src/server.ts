@@ -9,6 +9,7 @@ import { dataDirectory, db } from "./db.js";
 import { collectRepositoryEvidence, resolveProjectFile, validateRootPath } from "./repository.js";
 import { cloneAndInspectRepository, parsePublicRepository } from "./repository-import.js";
 import type { AgentKind, Evidence, Handoff, HandoffReceipt, HandoffReceiptEntry, MemoryItem, MemoryKind, Project } from "../../../packages/shared/src/contracts.js";
+import { AGENT_IDS, AGENT_REGISTRY } from "../../../packages/shared/src/agents.js";
 import { configuredExtractionProvider, extractContext } from "./intelligence.js";
 
 const API = "/api/v1";
@@ -49,7 +50,7 @@ const allowedOrigins = new Set(
       } catch { return []; }
     }),
 );
-const agentKinds = new Set<AgentKind>(["opencode", "codex", "other"]);
+const agentKinds = new Set<AgentKind>([...AGENT_IDS, "other"]);
 const memoryKinds = new Set<MemoryKind>(["task", "decision", "file", "issue", "note"]);
 let activeRepositoryImports = 0;
 const activeRepositoryUrls = new Set<string>();
@@ -185,6 +186,10 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       created_at AS createdAt, json_array_length(memory_ids_json) AS itemCount
       FROM handoffs ORDER BY MAX(created_at, COALESCE(approved_at, ''), COALESCE(loaded_at, '')) DESC, rowid DESC LIMIT 20`).all();
     return json(res, 200, { projectCount: count, handoffs }, origin);
+  }
+
+  if (method === "GET" && path.length === 1 && path[0] === "agents") {
+    return json(res, 200, { agents: AGENT_REGISTRY }, origin);
   }
 
   if (method === "GET" && path.length === 1 && path[0] === "projects") {
