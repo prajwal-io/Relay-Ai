@@ -138,13 +138,13 @@ body { margin: 0; background: transparent; overflow: hidden; }
 .panel-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 11px; }
 .panel-footer > span { display: flex; align-items: center; gap: 6px; color: #68717d; font-size: 10px; }
 .privacy-label { font: 7px ui-monospace, Consolas, monospace; letter-spacing: .1em; }
-.primary-action { border: 0; border-radius: 9px; background: var(--blue); color: #fff; font: 600 11px Inter, "Segoe UI", sans-serif; padding: 10px 13px; cursor: pointer; transition: background-color 150ms ease, transform 150ms var(--ease-out); }
+.primary-action { border: 0; border-radius: 9px; background: var(--blue); color: #fff; font: 600 11px Geist, "Segoe UI", sans-serif; padding: 10px 13px; cursor: pointer; transition: background-color 150ms ease, transform 150ms var(--ease-out); }
 .primary-action span { margin-left: 8px; }
 .primary-action:disabled { opacity: .48; cursor: not-allowed; }
 .primary-action:focus-visible, .text-button:focus-visible, .back-link:focus-visible, .chat-row:focus-visible, #chat-context:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .workflow { display: flex; flex-direction: column; height: calc(100% - 43px); padding-top: 7px; }
 .workflow[hidden], .workflow-stage[hidden], #monitor-view[hidden] { display: none; }
-.back-link, .text-button { padding: 5px 0; border: 0; background: none; color: #315cf5; font: 600 11px Inter, "Segoe UI", sans-serif; cursor: pointer; }
+.back-link, .text-button { padding: 5px 0; border: 0; background: none; color: #315cf5; font: 600 11px Geist, "Segoe UI", sans-serif; cursor: pointer; }
 .back-link { align-self: flex-start; margin-bottom: 12px; }
 .workflow-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid #e1e4e0; }
 .workflow-heading h1 { margin: 0; font-size: 25px; letter-spacing: -.035em; line-height: 1.1; }
@@ -212,3 +212,13 @@ body { margin: 0; background: transparent; overflow: hidden; }
   .capsule, .capsule::before, .agent-icon { transition: none; }
   .widget.arrival-pulse .capsule { animation: none; box-shadow: 0 15px 42px rgba(8,10,15,.34), 0 0 0 2px #315cf52b; }
 }
+.launch-choice { display: grid; gap: 8px; margin: 12px 0 14px; padding: 12px; border: 1px solid #e1e4e0; border-radius: 9px; }
+.launch-choice legend { padding: 0 5px; color: #596473; font: 600 10px Geist, "Segoe UI", sans-serif; }
+.launch-choice label { display: flex; align-items: flex-start; gap: 9px; padding: 8px; border-radius: 7px; cursor: pointer; }
+.launch-choice label:has(input:checked) { background: #eef2ff; }
+.launch-choice input { margin: 2px 0 0; accent-color: #315cf5; }
+.launch-choice label span { display: grid; gap: 3px; }
+.launch-choice strong { font-size: 11px; }
+.launch-choice small { color: #68717d; font-size: 10px; line-height: 1.4; }
+.launch-choice :focus-visible { outline: 2px solid #315cf5; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .launch-choice label { transition: none; } }

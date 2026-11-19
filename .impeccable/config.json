@@ -1,0 +1,76 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "geist",
+        "createdAt": "2026-11-19T15:11:47.713Z",
+        "reason": "User's Relay design brief specifies Geist Sans for primary interface typography."
+      },
+      {
+        "rule": "overused-font",
+        "value": "geist mono",
+        "createdAt": "2026-11-19T15:11:47.850Z",
+        "reason": "User's Relay design brief specifies Geist Mono for technical metadata."
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "apps/desktop/companion.html",
+          "apps/desktop/package-stage/companion.html"
+        ],
+        "createdAt": "2026-11-19T15:11:47.993Z",
+        "reason": "Relay mark SVG is centered at 29px inside a 53px container, leaving 12px inset; static detector misreads grid centering."
+      },
+      {
+        "rule": "dark-glow",
+        "value": "*",
+        "files": [
+          "apps/desktop/companion.html",
+          "apps/desktop/package-stage/companion.html"
+        ],
+        "createdAt": "2026-11-19T15:11:48.113Z",
+        "reason": "Signal-blue halo is only shown for connected or handoff-arrival states and is an intentional status cue."
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "apps/desktop/companion.html"
+        ],
+        "createdAt": "2026-11-19T16:28:56.517Z",
+        "reason": "The mark SVG is centered within its button; computed padding is not the mark's visible geometry."
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "apps/desktop/package-stage/companion.html"
+        ],
+        "createdAt": "2026-11-19T16:28:56.767Z",
+        "reason": "Packaged copy uses the same centered mark; computed padding is not the mark's visible geometry."
+      },
+      {
+        "rule": "dark-glow",
+        "value": "*",
+        "files": [
+          "apps/desktop/companion.html"
+        ],
+        "createdAt": "2026-11-19T16:28:56.962Z",
+        "reason": "Blue halo appears only for connected and handoff-arrival states as a status cue."
+      },
+      {
+        "rule": "dark-glow",
+        "value": "*",
+        "files": [
+          "apps/desktop/package-stage/companion.html"
+        ],
+        "createdAt": "2026-11-19T16:28:57.182Z",
+        "reason": "Packaged copy uses the same connected and handoff-arrival status cue."
+      }
+    ]
+  }
+}

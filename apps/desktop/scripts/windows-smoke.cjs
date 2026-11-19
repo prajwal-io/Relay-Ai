@@ -121,6 +121,7 @@ async function main() {
     const draft = await request(`/projects/${registered.id}/handoffs`, { source: 'codex', destination: 'opencode', title, memoryItemIds: [item.id] });
     await until(() => evaluate(dashboard, `document.body.innerText.includes(${JSON.stringify(title)})`), 'Dashboard receives external draft');
     await until(() => evaluate(companion, `document.querySelector("#handoff-title").textContent === ${JSON.stringify(title)}`), 'Companion receives external draft');
+    assert.equal(await evaluate(companion, 'document.querySelectorAll("input[name=launch-mode]").length'), 2, 'Companion offers Terminal and Desktop app handoff modes');
     await evaluate(dashboard, `[...document.querySelectorAll(".handoff-row")].find(button => button.textContent.includes(${JSON.stringify(title)})).click(); true`);
     await until(() => evaluate(dashboard, 'document.body.textContent.includes("Synthetic release fixture")'), 'Review includes saved context');
     await until(() => evaluate(dashboard, '[...document.querySelectorAll(".review-actions button")].some(button => button.textContent.includes("Approve selected context") && !button.disabled)'), 'Approval action ready');
@@ -134,6 +135,11 @@ async function main() {
       if (Date.now() - approvalStarted > 2000) throw new Error(`Approval did not update: ${JSON.stringify({handoff, review})}`);
       return false;
     }, 'Dashboard approval');
+    await until(() => evaluate(dashboard, 'Boolean(document.querySelector(".desktop-launch select"))'), 'Approved handoff launch choices');
+    assert.deepEqual(await evaluate(dashboard, 'Array.from(document.querySelector(".desktop-launch select").options, option => option.value)'), ['terminal', 'desktop']);
+    await evaluate(dashboard, 'const choice = document.querySelector(".desktop-launch select"); choice.value = "desktop"; choice.dispatchEvent(new Event("change", { bubbles: true })); true');
+    assert.match(await evaluate(dashboard, 'document.querySelector(".desktop-launch button").textContent'), /Open Desktop app/);
+    await evaluate(dashboard, 'const choice = document.querySelector(".desktop-launch select"); choice.value = "terminal"; choice.dispatchEvent(new Event("change", { bubbles: true })); true');
     const scoped = createHmac('sha256', token).update(`load:${draft.id}`).digest('hex');
     await request(`/handoffs/${draft.id}/load`, { destination: 'opencode' }, scoped);
     await until(() => evaluate(companion, 'document.querySelector("#handoff-meta").textContent.includes("Retrieved by destination")'), 'Companion retrieval');

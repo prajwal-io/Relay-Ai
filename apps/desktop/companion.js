@@ -11,6 +11,7 @@ let workflowGeneration = 0;
 let draft = null;
 let activeHandoffId = '';
 let handoffProgress = null;
+let launchMode = 'terminal';
 
 async function expand(value) {
   const sequence = ++expansionSequence;
@@ -99,9 +100,11 @@ function renderHandoffProgress(progress) {
     copy.textContent = 'OpenCode is connecting to Relay’s local handoff tool. No context is marked received yet.';
   } else {
     title.textContent = 'Waiting for OpenCode';
-    copy.textContent = progress.connection === 'connected'
-      ? 'The Relay tool is connected. Allow it if prompted, then ask OpenCode to retrieve the approved context.'
-      : 'OpenCode launched. Waiting for Relay to confirm its local connection and context retrieval.';
+    copy.textContent = progress.launchMode === 'desktop'
+      ? 'OpenCode Desktop opened at the project. Start a session and ask: “Load my approved Relay handoff.” Relay will confirm only after retrieval.'
+      : progress.connection === 'connected'
+        ? 'The Relay tool is connected. Allow it if prompted, then ask OpenCode to retrieve the approved context.'
+        : 'OpenCode launched. Waiting for Relay to confirm its local connection and context retrieval.';
   }
   if (retrieved) stepLabels[3].setAttribute('data-complete', '');
 }
@@ -113,7 +116,7 @@ retryOpenCode.addEventListener('click', async () => {
   document.querySelector('#retrieval-title').textContent = 'Retrying OpenCode';
   document.querySelector('#retrieval-copy').textContent = 'Relay is reopening the same approved handoff.';
   try {
-    const result = await window.relayDesktop.openOpenCode(handoffId);
+    const result = await window.relayDesktop.openOpenCode(handoffId, handoffProgress.launchMode || launchMode);
     if (!result.opened) {
       retryOpenCode.disabled = false;
       document.querySelector('#retrieval-copy').textContent = 'Retry canceled. The approved package is still available in Relay.';
@@ -217,14 +220,18 @@ document.querySelector('#prepare-chat').addEventListener('click', async event =>
   } catch (error) { if (workflowOpen && generation === workflowGeneration) status.textContent = errorMessage(error); }
   finally { button.disabled = false; }
 });
+document.querySelectorAll('input[name="launch-mode"]').forEach(input => input.addEventListener('change', event => {
+  launchMode = event.currentTarget.value;
+  document.querySelector('#launch-opencode').innerHTML = `${launchMode === 'desktop' ? 'Approve and open Desktop app' : 'Approve and open Terminal'} <span aria-hidden="true">→</span>`;
+}));
 document.querySelector('#launch-opencode').addEventListener('click', async event => {
   if (!draft) return;
   const generation = workflowGeneration;
-  const button = event.currentTarget; button.disabled = true; status.textContent = 'Approving and opening OpenCode…';
+  const button = event.currentTarget; button.disabled = true; status.textContent = `Approving and opening OpenCode ${launchMode === 'desktop' ? 'Desktop app' : 'in Terminal'}…`;
     try {
       activeHandoffId = draft.id;
       handoffProgress = null;
-      const result = await window.relayDesktop.openOpenCode(draft.id);
+      const result = await window.relayDesktop.openOpenCode(draft.id, launchMode);
       if (!workflowOpen || generation !== workflowGeneration) return;
       if (result.opened) {
         showStage('opened-stage');
@@ -232,7 +239,9 @@ document.querySelector('#launch-opencode').addEventListener('click', async event
         if (handoffProgress?.handoffId === activeHandoffId) renderHandoffProgress(handoffProgress);
         else {
           document.querySelector('#retrieval-title').textContent = 'OpenCode launched';
-          document.querySelector('#retrieval-copy').textContent = 'Waiting for Relay to confirm the connection and context retrieval.';
+          document.querySelector('#retrieval-copy').textContent = launchMode === 'desktop'
+            ? 'OpenCode Desktop opened at the project. Start a session and ask: “Load my approved Relay handoff.” Relay confirms only after retrieval.'
+            : 'Waiting for Relay to confirm the connection and context retrieval.';
         }
       } else { activeHandoffId = ''; status.textContent = 'Approval canceled. Your draft is still available.'; button.disabled = false; }
     }

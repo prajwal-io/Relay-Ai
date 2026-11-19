@@ -3,6 +3,7 @@ const { createHmac, randomBytes } = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { execFile, execFileSync } = require('node:child_process');
 const { promisify } = require('node:util');
+const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 const codex = require('./codex-client.cjs');
@@ -11,6 +12,7 @@ const { launchOpenCode } = require('./terminal-launcher.cjs');
 const { resolveDashboardUrl } = require('./dashboard-target.cjs');
 const { startLocalApi } = require('./api-startup.cjs');
 const { startDashboardServer } = require('./dashboard-server.cjs');
+const { installScopedMcp, openProjectUrl, restoreScopedMcp } = require('./opencode-desktop.cjs');
 app.commandLine.appendSwitch('force-renderer-accessibility');
 
 const root = app.isPackaged ? app.getAppPath() : path.resolve(__dirname, '../..');
@@ -24,6 +26,7 @@ let dashboardUrl;
 let dashboardWindow;
 let pendingAuthCallback;
 let installationToken;
+let openCodeRestoreWarning;
 const companionUrl = pathToFileURL(path.join(__dirname, 'companion.html')).href;
 let pollTimer;
 let expanded = true;
@@ -39,6 +42,7 @@ let currentState = { online: false, projectCount: 0, recent: null, notice: 'Star
 const positionPath = path.join(app.getPath('userData'), 'desktop-position.json');
 const installedDbPath = path.join(app.getPath('userData'), 'data', 'relay.sqlite');
 const restorePath = path.join(app.getPath('userData'), 'pending-restore.sqlite');
+const openCodeRestorePath = path.join(app.getPath('userData'), 'opencode-handoff-restore.json');
 const exec = promisify(execFile);
 const findCommand = (name, args) => {
   try { return execFileSync(name, args, { encoding: 'utf8', timeout: 3000, windowsHide: true }).split(/\r?\n/).find(Boolean); }
@@ -165,10 +169,11 @@ function sendState(event) {
   if (widget && !widget.isDestroyed()) widget.webContents.send('relay:state', currentState);
 }
 
-function reportHandoffProgress(handoffId, status, phase, connection, retryAvailable, error) {
+function reportHandoffProgress(handoffId, status, phase, connection, retryAvailable, error, launchMode = 'terminal', warning) {
   currentState = { ...currentState, handoffProgress: {
-    handoffId, status, phase, connection, retryAvailable,
+    handoffId, status, phase, connection, retryAvailable, launchMode,
     ...(error ? { error } : {}),
+    ...(warning ? { warning } : {}),
   } };
   sendState();
 }
@@ -314,10 +319,17 @@ async function loadRetryableHandoff(id, knownHandoff) {
   return handoff;
 }
 
-async function runOpenCodeHandoff(id) {
+function openCodeConfigPath() {
+  if (process.env.OPENCODE_CONFIG) return path.resolve(process.env.OPENCODE_CONFIG);
+  const configHome = process.env.OPENCODE_CONFIG_DIR || path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'opencode');
+  return path.join(configHome, fs.existsSync(path.join(configHome, 'opencode.jsonc')) ? 'opencode.jsonc' : fs.existsSync(path.join(configHome, 'opencode.json')) ? 'opencode.json' : 'opencode.json');
+}
+
+async function runOpenCodeHandoff(id, launchMode) {
   let handoffStatus = 'draft';
+  if (!['terminal', 'desktop'].includes(launchMode)) throw new Error('Choose Terminal or OpenCode Desktop to continue.');
   let bridgeConnected = bridges.get(id)?.bridge.isRunning() ?? false;
-  reportHandoffProgress(id, handoffStatus, 'starting', bridgeConnected ? 'connected' : 'pending', false);
+  reportHandoffProgress(id, handoffStatus, 'starting', bridgeConnected ? 'connected' : 'pending', false, undefined, launchMode);
   try {
     let handoff;
     if (!preparedDraft || preparedDraft.id !== id) {
@@ -337,8 +349,8 @@ async function runOpenCodeHandoff(id) {
       preparedDraft.evidence = handoff.evidence || preparedDraft.evidence;
     }
     handoffStatus = handoff.status;
-    const executable = locateOpenCode();
-    if (!executable) throw new Error('OpenCode was not found. Install or update the OpenCode CLI, add it to PATH, and restart Relay.');
+    const executable = launchMode === 'terminal' ? locateOpenCode() : undefined;
+    if (launchMode === 'terminal' && !executable) throw new Error('OpenCode CLI was not found. Install it, add it to PATH, and restart Relay.');
     const project = await apiRequest(`/projects/${encodeURIComponent(handoff.projectId)}`);
     if (!samePath(project.rootPath, preparedDraft.projectPath)) {
       throw new Error('This handoff now points to a different project folder. Review the project before retrying.');
@@ -355,12 +367,12 @@ async function runOpenCodeHandoff(id) {
     if (handoff.status === 'draft') {
       if (!preparedDraft.approved) {
         const decision = await dialog.showMessageBox(widget, {
-          type: 'question', buttons: ['Cancel', 'Approve and open OpenCode'], defaultId: 0, cancelId: 0,
+          type: 'question', buttons: ['Cancel', launchMode === 'desktop' ? 'Approve and open OpenCode Desktop' : 'Approve and open OpenCode in Terminal'], defaultId: 0, cancelId: 0,
           message: 'Transfer the reviewed Codex context to OpenCode?',
-          detail: 'OpenCode may send the approved content to its configured AI provider.',
+          detail: `OpenCode may send the approved content to its configured AI provider. ${launchMode === 'desktop' ? 'Desktop opens the project; start a session and ask OpenCode to retrieve the approved Relay handoff.' : 'Relay opens a terminal and asks OpenCode to retrieve the approved context.'}`,
         });
         if (decision.response !== 1 || preparedDraft?.id !== id) {
-          reportHandoffProgress(id, 'draft', 'error', 'pending', false, 'Approval canceled. Nothing was transferred.');
+          reportHandoffProgress(id, 'draft', 'error', 'pending', false, 'Approval canceled. Nothing was transferred.', launchMode);
           return { opened: false, handoffId: id };
         }
       }
@@ -370,7 +382,27 @@ async function runOpenCodeHandoff(id) {
       preparedDraft.approved = true;
       preparedDraft.status = 'approved';
       lastHandoffs.set(id, 'approved');
-      reportHandoffProgress(id, handoffStatus, 'starting', bridgeConnected ? 'connected' : 'pending', false);
+      reportHandoffProgress(id, handoffStatus, 'starting', bridgeConnected ? 'connected' : 'pending', false, undefined, launchMode);
+    }
+    if (launchMode === 'desktop') {
+      const mcpEntry = app.isPackaged ? path.join(process.resourcesPath, 'app.asar.unpacked', 'mcp', 'index.cjs') : path.join(root, 'apps', 'mcp', 'src', 'index.ts');
+      const command = app.isPackaged
+        ? [process.execPath, mcpEntry]
+        : [node, path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'), mcpEntry];
+      const environment = {
+        RELAY_API_URL: apiBase,
+        RELAY_SCOPED_HANDOFF_ID: id,
+        RELAY_MCP_ACCESS_TOKEN: installationToken && createHmac('sha256', installationToken).update(`load:${id}`).digest('hex'),
+        ...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
+      };
+      installScopedMcp({ configPath: openCodeConfigPath(), journalPath: openCodeRestorePath, handoffId: id, command, environment, cwd: app.isPackaged ? undefined : path.join(root, 'apps', 'mcp') });
+      try { await shell.openExternal(openProjectUrl(preparedDraft.projectPath)); }
+      catch (error) {
+        restoreScopedMcp(openCodeRestorePath, id);
+        throw new Error(`Could not open OpenCode Desktop. Your approved handoff is saved in Relay. ${error.message}`);
+      }
+      reportHandoffProgress(id, 'approved', 'waiting-for-retrieval', 'pending', true, undefined, launchMode);
+      return { opened: true, handoffId: id, launchMode };
     }
     let runtime = bridges.get(id);
     if (runtime && !runtime.bridge.isRunning()) {
@@ -384,7 +416,7 @@ async function runOpenCodeHandoff(id) {
         accessToken: installationToken && createHmac('sha256', installationToken).update(`load:${id}`).digest('hex'),
         packaged: app.isPackaged, runtimePath: process.execPath,
         mcpEntry: app.isPackaged ? path.join(process.resourcesPath, 'app.asar.unpacked', 'mcp', 'index.cjs') : undefined,
-        onProgress: (phase, connection) => reportHandoffProgress(id, 'approved', phase, connection, false),
+        onProgress: (phase, connection) => reportHandoffProgress(id, 'approved', phase, connection, false, undefined, launchMode),
       });
       runtime = { bridge, terminal: null };
       bridges.set(id, runtime);
@@ -396,26 +428,29 @@ async function runOpenCodeHandoff(id) {
     child.unref();
     runtime.terminal = child;
     reportHandoffProgress(id, 'approved', 'waiting-for-retrieval', 'connected', true);
-    return { opened: true, handoffId: id };
+    return { opened: true, handoffId: id, launchMode };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Relay could not open OpenCode. Try again from Relay.';
     const runtime = bridges.get(id);
     const retryAvailable = handoffStatus === 'approved' && !/repository changed|different project folder/i.test(message);
-    reportHandoffProgress(id, handoffStatus, 'error', runtime?.bridge.isRunning() ? 'connected' : 'error', retryAvailable, message);
+    reportHandoffProgress(id, handoffStatus, 'error', runtime?.bridge.isRunning() ? 'connected' : 'error', retryAvailable, message, launchMode);
     throw error;
   }
 }
 
-async function approveAndOpen(id) {
+async function approveAndOpen(id, launchMode = 'terminal') {
   if (typeof id !== 'string' || !id) throw new Error('Choose a Relay handoff to open.');
+  if (!['terminal', 'desktop'].includes(launchMode)) throw new Error('Choose Terminal or OpenCode Desktop to continue.');
   if (openingHandoffs.has(id)) return openingHandoffs.get(id);
-  const opening = runOpenCodeHandoff(id);
+  const opening = runOpenCodeHandoff(id, launchMode);
   openingHandoffs.set(id, opening);
   try { return await opening; }
   finally { if (openingHandoffs.get(id) === opening) openingHandoffs.delete(id); }
 }
 
 async function ensureApi() {
+  try { restoreScopedMcp(openCodeRestorePath); }
+  catch (error) { openCodeRestoreWarning = `Relay could not remove a temporary OpenCode handoff setting: ${error.message}`; }
   if (app.isPackaged) {
     const userDataPath = app.getPath('userData');
     fs.mkdirSync(userDataPath, { recursive: true });
@@ -448,6 +483,7 @@ async function ensureApi() {
   apiProcess = result.process;
   if (apiProcess) apiProcess.once('exit', () => { apiProcess = null; });
   currentState = { ...currentState, online: result.notice === 'Watching local projects', notice: result.notice };
+  if (openCodeRestoreWarning) currentState.notice = openCodeRestoreWarning;
   return currentState.online;
 }
 
@@ -472,7 +508,7 @@ async function pollActivity() {
       title: completed.title, source: completed.source, destination: completed.destination,
       status: completed.status, verification: completed.verification,
       itemCount: completed.itemCount, createdAt: completed.createdAt
-    } : null, notice: completed ? 'Handoff retrieved' : 'Watching local projects' };
+    } : null, notice: openCodeRestoreWarning || (completed ? 'Handoff retrieved' : 'Watching local projects') };
     let progress = currentState.handoffProgress;
     if (!progress && handoffs[0]?.status === 'approved' && handoffs[0]?.destination === 'opencode') {
       reportHandoffProgress(handoffs[0].id, 'approved', 'waiting-for-retrieval', 'pending', true);
@@ -484,7 +520,12 @@ async function pollActivity() {
         if (handoff.status === 'loaded') {
           const receipt = await requestJson(`${apiBase}/handoffs/${encodeURIComponent(progress.handoffId)}/receipt`);
           if (receipt.retrievalCount > 0 && receipt.destination === handoff.destination) {
-            reportHandoffProgress(handoff.id, 'loaded', 'retrieved', 'connected', false);
+            let warning;
+            if (progress.launchMode === 'desktop') {
+              try { restoreScopedMcp(openCodeRestorePath, handoff.id); openCodeRestoreWarning = undefined; }
+              catch (error) { warning = `Context arrived, but Relay could not remove its temporary OpenCode configuration: ${error.message}`; openCodeRestoreWarning = warning; }
+            }
+            reportHandoffProgress(handoff.id, 'loaded', 'retrieved', 'connected', false, undefined, progress.launchMode, warning);
           } else {
             reportHandoffProgress(handoff.id, 'loaded', 'error', 'error', false, 'Relay reports retrieval without a matching receipt. Check the dashboard before continuing.');
           }
@@ -500,9 +541,11 @@ async function pollActivity() {
   }
 }
 
-function handle(channel, handler) {
+function handle(channel, handler, allowDashboard = false) {
   ipcMain.handle(channel, (event, ...args) => {
-    if (event.sender !== widget?.webContents || event.senderFrame !== event.sender.mainFrame || event.senderFrame.url !== companionUrl) {
+    const trustedWidget = event.sender === widget?.webContents && event.senderFrame.url === companionUrl;
+    const trustedDashboard = allowDashboard && event.sender === dashboardWindow?.webContents && dashboardUrl && new URL(event.senderFrame.url).origin === new URL(dashboardUrl).origin;
+    if ((!trustedWidget && !trustedDashboard) || event.senderFrame !== event.sender.mainFrame) {
       throw new Error('Relay rejected an untrusted desktop request.');
     }
     return handler(event, ...args);
@@ -518,7 +561,7 @@ handle('relay:read-chat', async (_event, id) => {
   return { ...await codex.readChat(id), chat: selectedChat };
 });
 handle('relay:prepare-chat', (_event, text) => prepareChatDraft(text));
-handle('relay:open-opencode', (_event, id) => approveAndOpen(id));
+handle('relay:open-opencode', (_event, id, mode) => approveAndOpen(id, mode), true);
 handle('relay:move-by', (_event, dx, dy) => {
   if (!widget || widget.isDestroyed()) return;
   if (!Number.isFinite(dx) || !Number.isFinite(dy) || Math.abs(dx) > 120 || Math.abs(dy) > 120) return;
@@ -547,6 +590,7 @@ app.whenReady().then(async () => {
   try { online = await ensureApi(); }
   catch (error) { currentState = { ...currentState, notice: error.message }; }
   currentState = { ...currentState, online, notice: online ? 'Watching local projects' : currentState.notice };
+  if (openCodeRestoreWarning) currentState.notice = openCodeRestoreWarning;
   if (online) {
     await pollActivity();
     pollTimer = setInterval(() => void pollActivity(), 2500);
@@ -564,6 +608,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
+  try { restoreScopedMcp(openCodeRestorePath); } catch { /* The startup cleanup retries without overwriting OpenCode edits. */ }
   clearInterval(pollTimer);
   clearTimeout(positionTimer);
   writePosition();
