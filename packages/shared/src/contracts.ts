@@ -50,6 +50,7 @@ export interface MemoryItem {
 }
 
 export interface Handoff {
+  sourceSessionId?: string;
   id: string;
   projectId: string;
   source: AgentKind;
@@ -77,6 +78,10 @@ export interface HandoffReceiptEntry {
 }
 
 export interface HandoffReceipt {
+  source?: AgentKind;
+  projectId?: string;
+  sourceSessionId?: string;
+  approvedAt?: string;
   handoffId: string;
   destination: AgentKind;
   approvedItemIds: string[];

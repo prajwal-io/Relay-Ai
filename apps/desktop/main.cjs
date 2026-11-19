@@ -298,7 +298,7 @@ async function prepareChatDraft(text) {
     }));
     memoryIds.push(...items.map(item => item.id));
   }
-  const draft = await postApi(`/projects/${encodeURIComponent(project.id)}/handoffs`, { source: 'codex', destination: 'opencode', title: selectedChat.title, memoryItemIds: memoryIds });
+  const draft = await postApi(`/projects/${encodeURIComponent(project.id)}/handoffs`, { source: 'codex', destination: 'opencode', title: selectedChat.title, sourceSessionId: selectedChat.id, memoryItemIds: memoryIds });
   preparedDraft = { id: draft.id, projectId: project.id, projectPath: project.rootPath, text, memoryIds, evidence: draft.evidence || [] };
   return draft;
 }

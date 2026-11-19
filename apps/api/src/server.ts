@@ -89,7 +89,7 @@ function memoryFrom(row: any): MemoryItem {
   return { id: row.id, projectId: row.project_id, ...(row.session_id ? { sessionId: row.session_id } : {}), kind: row.kind, content: row.content, ...(row.status ? { status: row.status } : {}), source: row.source, ...(row.confidence == null ? {} : { confidence: row.confidence }), tags: JSON.parse(row.tags_json), evidence: JSON.parse(row.evidence_json), createdAt: row.created_at, updatedAt: row.updated_at };
 }
 function handoffFrom(row: any): Handoff {
-  return { id: row.id, projectId: row.project_id, source: row.source, destination: row.destination, title: row.title, summary: row.summary, memoryItemIds: JSON.parse(row.memory_ids_json), evidence: JSON.parse(row.evidence_json), verification: row.verification, status: row.status, createdAt: row.created_at, ...(row.approved_at ? { approvedAt: row.approved_at } : {}), ...(row.loaded_at ? { loadedAt: row.loaded_at } : {}) };
+  return { id: row.id, projectId: row.project_id, ...(row.source_session_id ? { sourceSessionId: row.source_session_id } : {}), source: row.source, destination: row.destination, title: row.title, summary: row.summary, memoryItemIds: JSON.parse(row.memory_ids_json), evidence: JSON.parse(row.evidence_json), verification: row.verification, status: row.status, createdAt: row.created_at, ...(row.approved_at ? { approvedAt: row.approved_at } : {}), ...(row.loaded_at ? { loadedAt: row.loaded_at } : {}) };
 }
 function loadProject(id: string): Project {
   const row = db.prepare("SELECT * FROM projects WHERE id=?").get(id) as any;
@@ -116,8 +116,8 @@ function rankItems(items: MemoryItem[], query = ""): MemoryItem[] {
   }).sort((a, b) => b.score - a.score || b.item.updatedAt.localeCompare(a.item.updatedAt)).map(({ item }) => item).slice(0, 40);
 }
 function saveHandoff(h: Handoff) {
-  db.prepare(`INSERT INTO handoffs (id,project_id,source,destination,title,summary,memory_ids_json,evidence_json,verification,status,created_at,approved_at,loaded_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(h.id,h.projectId,h.source,h.destination,h.title,h.summary,JSON.stringify(h.memoryItemIds),JSON.stringify(h.evidence),h.verification,h.status,h.createdAt,h.approvedAt ?? null,h.loadedAt ?? null);
+  db.prepare(`INSERT INTO handoffs (id,project_id,source,destination,title,summary,memory_ids_json,evidence_json,verification,status,created_at,approved_at,loaded_at,source_session_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(h.id,h.projectId,h.source,h.destination,h.title,h.summary,JSON.stringify(h.memoryItemIds),JSON.stringify(h.evidence),h.verification,h.status,h.createdAt,h.approvedAt ?? null,h.loadedAt ?? null,h.sourceSessionId ?? null);
 }
 function updateHandoff(h: Handoff) {
   db.prepare("UPDATE handoffs SET memory_ids_json=?,evidence_json=?,verification=?,status=?,approved_at=?,loaded_at=? WHERE id=?")
@@ -293,7 +293,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     const itemEvidence = repo.evidence.filter((e) => e.kind !== "git-status");
     const verification = repo.conflicts.length ? "conflict" : itemEvidence.some((e) => e.status === "verified") ? "partial" : "unverified";
     const summary = items.length ? items.slice(0, 6).map((x) => `• ${x.content}`).join("\n") : "No saved project context matched this handoff yet.";
-    const handoff: Handoff = { id: randomUUID(), projectId: project.id, source: data.source, destination: data.destination, title: typeof data.title === "string" && data.title.trim() ? data.title.trim().slice(0, 120) : `Continue in ${data.destination}`, summary, memoryItemIds: items.map((x) => x.id), evidence, verification, status: "draft", createdAt: now };
+    const handoff: Handoff = { id: randomUUID(), projectId: project.id, ...(typeof data.sourceSessionId === 'string' && data.sourceSessionId.length <= 200 ? { sourceSessionId: data.sourceSessionId } : {}), source: data.source, destination: data.destination, title: typeof data.title === "string" && data.title.trim() ? data.title.trim().slice(0, 120) : `Continue in ${data.destination}`, summary, memoryItemIds: items.map((x) => x.id), evidence, verification, status: "draft", createdAt: now };
     saveHandoff(handoff); return json(res, 201, handoff, origin);
   }
   if (path[0] === "projects" && path[1] && path[2] === "verification" && method === "GET") {
@@ -379,7 +379,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       const evidence = latest?.evidence ?? handoff.evidence;
       const repositoryStatus = await getReceiptRepositoryStatus(handoff);
       const receipt: HandoffReceipt = {
-        handoffId: handoff.id,
+        handoffId: handoff.id, source: handoff.source, projectId: handoff.projectId, sourceSessionId: handoff.sourceSessionId, approvedAt: handoff.approvedAt,
         destination: latest?.destination ?? handoff.destination,
         approvedItemIds: latest?.approvedItemIds ?? handoff.memoryItemIds,
         approvedItems: latest?.approvedItems ?? [],
