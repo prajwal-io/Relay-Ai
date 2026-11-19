@@ -5,7 +5,7 @@ import { supabase, supabaseConfigured } from './supabase';
 type Project = { id: string; name: string; repository?: string };
 type SavedMemory = { id: string; kind: string; content: string; status?: string; source: string; updatedAt: string };
 type BackupPreview = { project: Project; items: SavedMemory[] }[];
-const API = (import.meta as any).env?.VITE_RELAY_API ?? ((import.meta as any).env?.DEV ? '/api/v1' : 'http://127.0.0.1:4317/api/v1');
+const API = (import.meta as any).env?.VITE_RELAY_API?.trim() || ((import.meta as any).env?.DEV ? '/api/v1' : 'http://127.0.0.1:4317/api/v1');
 
 function cloudSafeText(value: string) {
   return value

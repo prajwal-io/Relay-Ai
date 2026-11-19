@@ -201,6 +201,26 @@ test("SQLite project and memory persistence plus approved destination handoff fl
   assert.equal((await history.json() as any[]).length, 1);
 });
 
+test("concurrent draft refreshes cannot undo a human-approved handoff", async () => {
+  const root = join(temp, "approval-refresh-race");
+  await mkdir(root);
+  await writeFile(join(root, "tracked.txt"), "release fixture\n");
+  execFileSync("git", ["init", root], { stdio: "ignore" });
+  execFileSync("git", ["-C", root, "config", "user.name", "Relay test"], { stdio: "ignore" });
+  execFileSync("git", ["-C", root, "config", "user.email", "relay-test@example.invalid"], { stdio: "ignore" });
+  execFileSync("git", ["-C", root, "add", "tracked.txt"], { stdio: "ignore" });
+  execFileSync("git", ["-C", root, "commit", "-m", "fixture"], { stdio: "ignore" });
+  await Promise.all(Array.from({ length: 1200 }, (_, index) => writeFile(join(root, `untracked-${index}.txt`), `fixture ${index}\n`)));
+
+  const project = await (await post(`${base}/projects`, { name: "Approval race fixture", rootPath: root })).json() as any;
+  const draft = await (await post(`${base}/projects/${project.id}/handoffs`, { source: "codex", destination: "opencode" })).json() as any;
+  const staleReads = Array.from({ length: 4 }, () => fetch(`${base}/handoffs/${draft.id}`).then(response => response.json() as Promise<any>));
+  await delay(20);
+  assert.equal((await post(`${base}/handoffs/${draft.id}/approve`, {})).status, 200);
+  await Promise.all(staleReads);
+  assert.equal((await (await fetch(`${base}/handoffs/${draft.id}`)).json() as any).status, "approved");
+});
+
 test("MCP retrieves only an approved handoff for the intended destination", async () => {
   const mcpRoot = join(temp, "mcp-project");
   await mkdir(mcpRoot);

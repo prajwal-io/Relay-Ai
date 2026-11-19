@@ -10,7 +10,7 @@ type MemoryItem = { id: string; projectId: string; kind: string; content: string
 type Handoff = { id: string; projectId?: string; title: string; summary?: string; source: string; destination: string; verification: string; evidence?: { kind: string; status: string; description: string; source: string; memoryItemId?: string }[]; memoryItemIds?: string[]; createdAt: string; status: string };
 type HandoffActivity = Pick<Handoff, 'id' | 'projectId' | 'title' | 'source' | 'destination' | 'verification' | 'createdAt' | 'status'>;
 const env = (import.meta as any).env;
-const API = env?.VITE_RELAY_API ?? (env?.DEV ? '/api/v1' : 'http://127.0.0.1:4317/api/v1');
+const API = env?.VITE_RELAY_API?.trim() || (env?.DEV ? '/api/v1' : 'http://127.0.0.1:4317/api/v1');
 const desktopApp = typeof navigator !== 'undefined' && /\bElectron\//i.test(navigator.userAgent);
 
 function Mark({ small = false }: { small?: boolean }) {
@@ -119,18 +119,25 @@ function Dashboard({ goHome }: { goHome: () => void }) {
 
   const load = async () => {
     setLoading(true); setError('');
+    let connected = false;
+    let failure = 'The local service did not respond.';
     try {
-      const [health, p] = await Promise.all([fetch(`${API}/health`), fetch(`${API}/projects`)]);
-      if (!health.ok || !p.ok) throw new Error('Open the dashboard from the Relay desktop tray. If you are running from source, start the local servers with npm run dev.');
-      const healthInfo = await health.json(); setExtractionProvider(healthInfo.intelligenceProvider === 'groq' ? 'groq' : 'local');
-      const pj = await p.json(); setProjects(Array.isArray(pj) ? pj : pj.projects ?? []); setServiceState('ok');
-      if (!selectedProject.current && Array.isArray(pj) && pj.length) { selectedProject.current = pj[0].id; setSelectedProjectId(pj[0].id); }
-
-    } catch {
-      setServiceState('offline');
-      setError('Open the dashboard from the Relay desktop tray. If you are running from source, start the local servers with npm run dev.');
-    }
-    finally { setLoading(false); }
+      for (let attempt = 0; attempt < 3 && !connected; attempt++) {
+        try {
+          const signal = AbortSignal.timeout(4000);
+          const [health, p] = await Promise.all([fetch(`${API}/health`, { signal }), fetch(`${API}/projects`, { signal })]);
+          if (!health.ok || !p.ok) throw new Error(`Relay API returned ${health.status}/${p.status}`);
+          const healthInfo = await health.json(); setExtractionProvider(healthInfo.intelligenceProvider === 'groq' ? 'groq' : 'local');
+          const pj = await p.json(); setProjects(Array.isArray(pj) ? pj : pj.projects ?? []); setServiceState('ok');
+          if (!selectedProject.current && Array.isArray(pj) && pj.length) { selectedProject.current = pj[0].id; setSelectedProjectId(pj[0].id); }
+          connected = true;
+        } catch (cause) {
+          failure = cause instanceof Error ? cause.message : String(cause);
+          if (attempt < 2) await new Promise(resolve => window.setTimeout(resolve, 300));
+        }
+      }
+      if (!connected) { setServiceState('offline'); setError(`Open the dashboard from the Relay desktop tray. If you are running from source, start the local servers with npm run dev. ${failure}`); }
+    } finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, []);
 

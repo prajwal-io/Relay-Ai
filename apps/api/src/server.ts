@@ -308,8 +308,11 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         const items = memoryByIds(project.id, handoff.memoryItemIds);
         const [repo, gitState] = await Promise.all([collectRepositoryEvidence(project.rootPath, items), getGitState(project.rootPath)]);
         const itemEvidence = repo.evidence.filter((entry) => entry.kind !== "git-status");
-        handoff = { ...handoff, evidence: [...gitState, ...itemEvidence], verification: repo.conflicts.length ? "conflict" : itemEvidence.some((entry) => entry.status === "verified") ? "partial" : "unverified" };
-        updateHandoff(handoff);
+        const evidence = [...gitState, ...itemEvidence];
+        const verification = repo.conflicts.length ? "conflict" : itemEvidence.some((entry) => entry.status === "verified") ? "partial" : "unverified";
+        const refreshed = db.prepare("UPDATE handoffs SET evidence_json=?,verification=? WHERE id=? AND status='draft'")
+          .run(JSON.stringify(evidence), verification, handoff.id);
+        handoff = refreshed.changes ? { ...handoff, evidence, verification } : loadHandoff(handoff.id);
       }
       return json(res, 200, handoff, origin);
     }
