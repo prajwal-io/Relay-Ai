@@ -1,6 +1,8 @@
 /** Shared contracts for the Relay AI local service, web client, and MCP tools. */
 
-export type AgentKind = "opencode" | "codex" | "other";
+import type { AgentId } from "./agents.js";
+
+export type AgentKind = AgentId | "other";
 export type MemoryKind = "task" | "decision" | "file" | "issue" | "note";
 export type EvidenceStatus = "verified" | "unverified" | "conflict";
 
