@@ -202,10 +202,15 @@ function createWidget() {
   widget.webContents.on('will-navigate', event => event.preventDefault());
 }
 
-async function openDashboard() {
-  if (!app.isPackaged) return shell.openExternal(await resolveDashboardUrl({ configured: process.env.RELAY_DASHBOARD_URL }));
+async function openDashboard(studio = false) {
+  const target = new URL(app.isPackaged ? dashboardUrl || 'http://127.0.0.1' : await resolveDashboardUrl({ configured: process.env.RELAY_DASHBOARD_URL }));
+  if (studio === true) target.hash = 'handoff-studio';
+  if (!app.isPackaged) return shell.openExternal(target.href);
   if (!dashboardUrl || !currentState.online) throw new Error('The local Relay API is unavailable. Check the companion status and restart Relay.');
-  if (dashboardWindow && !dashboardWindow.isDestroyed()) return dashboardWindow.focus();
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    if (studio === true) await dashboardWindow.loadURL(target.href);
+    return dashboardWindow.focus();
+  }
   dashboardWindow = new BrowserWindow({
     width: 1240, height: 850, title: 'Relay AI',
     webPreferences: { partition: 'relay-installed-dashboard', preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false },
@@ -222,7 +227,7 @@ async function openDashboard() {
   });
   contents.on('will-redirect', event => event.preventDefault());
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  await dashboardWindow.loadURL(dashboardUrl);
+  await dashboardWindow.loadURL(target.href);
   if (pendingAuthCallback) {
     dashboardWindow.webContents.send('relay:auth-callback', pendingAuthCallback);
     pendingAuthCallback = undefined;
@@ -595,7 +600,7 @@ handle('relay:move-by', (_event, dx, dy) => {
   widget.setBounds(clampBounds({ ...current, x: current.x + dx, y: current.y + dy }));
   persistPosition();
 });
-handle('relay:open-dashboard', openDashboard);
+handle('relay:open-dashboard', (_event, studio) => openDashboard(studio === true));
 handle('relay:hide', () => widget?.hide());
 
 const initialAuthUrl = process.argv.find(arg => arg.startsWith('relay-ai://'));

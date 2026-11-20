@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('relayDesktop', {
   prepareChat: text => ipcRenderer.invoke('relay:prepare-chat', text),
   openOpenCode: (id, mode = 'terminal') => ipcRenderer.invoke('relay:open-opencode', id, mode),
   moveBy: (dx, dy) => ipcRenderer.invoke('relay:move-by', dx, dy),
-  openDashboard: () => ipcRenderer.invoke('relay:open-dashboard'),
+  openDashboard: studio => ipcRenderer.invoke('relay:open-dashboard', studio === true),
   onAuthCallback: callback => {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on('relay:auth-callback', listener);

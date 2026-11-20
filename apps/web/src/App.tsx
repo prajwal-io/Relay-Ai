@@ -85,7 +85,7 @@ function Landing({ goDashboard }: { goDashboard: () => void }) {
 }
 
 function Dashboard({ goHome }: { goHome: () => void }) {
-  const [tab, setTab] = useState('Overview');
+  const [tab, setTab] = useState(location.hash === '#handoff-studio' ? 'Handoff studio' : 'Overview');
   const [projects, setProjects] = useState<Project[]>([]);
   const [handoffs, setHandoffs] = useState<HandoffActivity[]>([]);
   const [projectHandoffs, setProjectHandoffs] = useState<Handoff[]>([]);
@@ -388,8 +388,8 @@ function EmptyState({ icon, title, text, action, onAction }: { icon: React.React
 function Setting({ title, detail, state }: { title: string; detail: string; state: string }) { return <div className="setting-row"><div><strong>{title}</strong><p>{detail}</p></div><span>{state}</span></div>; }
 
 export default function App() {
-  const [dashboard, setDashboard] = useState(location.hash === '#dashboard' || new URLSearchParams(location.search).get('next') === 'dashboard');
-  useEffect(() => { const onHash = () => setDashboard(location.hash === '#dashboard'); window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash); }, []);
+  const [dashboard, setDashboard] = useState(['#dashboard', '#handoff-studio'].includes(location.hash) || new URLSearchParams(location.search).get('next') === 'dashboard');
+  useEffect(() => { const onHash = () => setDashboard(['#dashboard', '#handoff-studio'].includes(location.hash)); window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash); }, []);
   const goDashboard = () => { location.hash = 'dashboard'; window.scrollTo(0, 0); };
   const goHome = () => { location.hash = 'top'; window.scrollTo(0, 0); };
   return <><a className="skip-link" href="#main-content" onClick={event => { event.preventDefault(); document.getElementById('main-content')?.focus(); }}>Skip to main content</a>{dashboard ? <Dashboard goHome={goHome}/> : <LandingPage goDashboard={goDashboard}/>}</>;

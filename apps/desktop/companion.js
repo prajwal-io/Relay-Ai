@@ -188,6 +188,11 @@ async function readChat(id) {
     draft = null; showStage('review-stage'); context.focus();
   } catch (error) { if (workflowOpen && generation === workflowGeneration) { status.textContent = errorMessage(error); for (const button of chatList.querySelectorAll('button')) button.disabled = false; } }
 }
+document.querySelector('#all-agents').addEventListener('click', () => {
+  void window.relayDesktop.openDashboard(true).catch(error => {
+    document.querySelector('#local-status').textContent = errorMessage(error);
+  });
+});
 document.querySelector('#start-switch').addEventListener('click', async () => {
   workflowOpen = true; monitor.hidden = true; workflow.hidden = false;
   document.querySelector('#back-monitor').focus();
