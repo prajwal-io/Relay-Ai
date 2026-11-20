@@ -149,7 +149,11 @@ function Dashboard({ goHome }: { goHome: () => void }) {
       if (!connected) { setServiceState('offline'); setError(`Open the dashboard from the Relay desktop tray. If you are running from source, start the local servers with npm run dev. ${failure}`); }
     } finally { setLoading(false); }
   };
-  useEffect(() => { void load(); if (desktopApp) void fetch(`${API}/onboarding`).then(r => r.ok ? r.json() : null).then(state => { if (state && state.setupStatus !== 'completed') setOnboarding(true); if (state && !state.firstVerifiedHandoffId) setFirstHandoffPending(true); }).catch(() => {}); }, []);
+  useEffect(() => { void load(); if (desktopApp) void fetch(`${API}/onboarding`).then(r => r.ok ? r.json() : null).then(state => { if (state && state.setupStatus !== 'completed') setOnboarding(true); if (state) {
+    setFirstHandoffPending(!state.firstVerifiedHandoffId);
+    if (state.selectedSourceAgentId) setHandoffSource(state.selectedSourceAgentId);
+    if (state.selectedDestinationAgentId) setHandoffDestination(state.selectedDestinationAgentId);
+  } }).catch(() => {}); }, []);
 
   const submitProject = async (e: React.FormEvent) => {
     e.preventDefault(); if (!projectName.trim() || !projectPath.trim()) return;
@@ -198,7 +202,7 @@ function Dashboard({ goHome }: { goHome: () => void }) {
     void fetch(`${API}/handoffs/${encodeURIComponent(activeHandoff.id)}/receipt`).then(async response => {
       if (!response.ok) throw new Error('Could not load the handoff receipt.');
       const receipt = await response.json();
-      if (!stopped) setHandoffReceipt(receipt);
+      if (!stopped) { setHandoffReceipt(receipt); if (receipt.retrievedAt) setFirstHandoffPending(false); }
     }).catch(e => { if (!stopped) setError(e instanceof Error ? e.message : 'Could not load the handoff receipt.'); });
     return () => { stopped = true; };
   }, [activeHandoff?.id, activeHandoff?.status]);
@@ -226,6 +230,10 @@ function Dashboard({ goHome }: { goHome: () => void }) {
           setSelectedProjectId(currentProjects[0].id);
         }
         setHandoffs(activity.handoffs.slice(0, 5));
+        if (desktopApp && firstHandoffPending && activity.handoffs.some((handoff: HandoffActivity) => handoff.status === 'loaded')) {
+          const setup = await read('/onboarding');
+          if (!controller.signal.aborted && setup.firstVerifiedHandoffId) setFirstHandoffPending(false);
+        }
         if (current) {
           setProjectHandoffs(current);
           setActiveHandoff(previous => previous ? current.find((handoff: Handoff) => handoff.id === previous.id) ?? previous : previous);
@@ -235,7 +243,7 @@ function Dashboard({ goHome }: { goHome: () => void }) {
     };
     void refresh();
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [selectedProjectId, serviceState, tab]);
+  }, [selectedProjectId, serviceState, tab, firstHandoffPending]);
   const reviewHandoff = async (entry: HandoffActivity) => {
     const projectId = entry.projectId ?? selectedProjectId;
     selectProject(projectId);
@@ -361,7 +369,7 @@ function Dashboard({ goHome }: { goHome: () => void }) {
   const desktopDetail = desktopApp ? 'The Relay desktop companion is installed and running on this computer.' : env?.DEV ? 'For local development, run npm run desktop from the repository root to start the tray companion.' : 'Install the Relay desktop app to use the local tray companion.';
   const desktopState = desktopApp ? 'Installed' : env?.DEV ? 'Development' : 'Separate app';
   const conflictingItemIds = new Set((activeHandoff?.evidence ?? []).filter(item => item.status === 'conflict' && item.memoryItemId).map(item => item.memoryItemId));
-  if (onboarding) return <Onboarding api={API} onFinish={(source, destination) => { setOnboarding(false); if (source) setHandoffSource(source); if (destination) setHandoffDestination(destination); if (source || destination) setTab('Handoff studio'); }}/>;
+  if (onboarding) return <Onboarding api={API} onFinish={(source, destination, startSwitch) => { setOnboarding(false); if (source) setHandoffSource(source); if (destination) setHandoffDestination(destination); if (startSwitch) setTab('Handoff studio'); }}/>;
   return <div className="dashboard">
     <aside className={`sidebar ${showMobileNav ? 'sidebar-open' : ''}`}><div className="sidebar-top"><div className="sidebar-brand"><Wordmark/><button onClick={goHome} aria-label="Return to landing page"><ArrowLeft size={14}/></button></div><div className="workspace-picker"><span className="workspace-avatar">R</span><span><strong>Local workspace</strong><small>Relay AI</small></span><ChevronDown size={14}/></div><div className="side-label">WORKSPACE</div><nav id="dashboard-nav" aria-label="Workspace navigation">{sections.map(s => <button key={s} onClick={() => { setTab(s); setShowMobileNav(false); }} className={tab === s ? 'side-link active' : 'side-link'} aria-current={tab === s ? 'page' : undefined}><span className="side-icon"><SectionGlyph name={s}/></span>{s}</button>)}</nav></div><div className="sidebar-bottom"><div className="service-status"><span className={serviceState === 'ok' ? 'status-dot online' : 'status-dot'}/><div><strong>{statusCopy}</strong><small>{serviceState === 'ok' ? '127.0.0.1 · local only' : 'Start the local Relay service'}</small></div></div><button className="sidebar-help" onClick={() => setTab('Settings')}><CircleAlert size={14}/> Service & privacy settings</button></div></aside>
     {showMobileNav && <button className="mobile-scrim" onClick={() => setShowMobileNav(false)} aria-label="Close navigation"/>}
