@@ -141,14 +141,14 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   // have no Fetch Metadata headers and remain supported over loopback.
   if (req.headers["sec-fetch-site"] === "cross-site") return fail(res, 403, "CROSS_SITE_REQUEST", "Cross-site browser requests cannot access the local Relay service", origin);
   if (req.method === "OPTIONS") {
-    res.writeHead(204, { "access-control-allow-origin": origin && allowedOrigins.has(origin) ? origin : "null", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type, authorization", "access-control-max-age": "600", vary: "Origin" });
+    res.writeHead(204, { "access-control-allow-origin": origin && allowedOrigins.has(origin) ? origin : "null", "access-control-allow-methods": "GET,POST,PATCH,OPTIONS", "access-control-allow-headers": "content-type, authorization", "access-control-max-age": "600", vary: "Origin" });
     return res.end();
   }
-  if (req.method === "POST" && !/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] ?? "")) {
+  if (["POST", "PATCH"].includes(req.method ?? "") && !/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] ?? "")) {
     return fail(res, 415, "JSON_REQUIRED", "POST requests must use application/json", origin);
   }
-  if (!req.method || !["GET", "POST"].includes(req.method)) {
-    res.setHeader("allow", "GET, POST, OPTIONS");
+  if (!req.method || !["GET", "POST", "PATCH"].includes(req.method)) {
+    res.setHeader("allow", "GET, POST, PATCH, OPTIONS");
     return fail(res, 405, "METHOD_NOT_ALLOWED", "This method is not supported by the Relay API", origin);
   }
   const now = Date.now();
@@ -180,6 +180,32 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   if (!url.pathname.startsWith(`${API}/`)) return fail(res, 404, "NOT_FOUND", "Route not found", origin);
   const path = url.pathname.slice(API.length).split("/").filter(Boolean).map(decodeURIComponent);
   const method = req.method ?? "GET";
+
+  if (path.length === 1 && path[0] === "onboarding" && ["GET", "PATCH"].includes(method)) {
+    const defaults = { onboardingVersion: 1, setupStatus: "not-started", completedStages: [], selectedSourceAgentId: null, selectedDestinationAgentId: null, floatingCompanionEnabled: true, themePreference: "system", preferredShortcut: null, lastSelectedProjectId: null, onboardingStartedAt: null, setupCompletedAt: null, dismissedHints: [] };
+    const row = db.prepare("SELECT state_json FROM onboarding WHERE id=1").get() as { state_json: string } | undefined;
+    let state: Record<string, any> = { ...defaults, ...(row ? JSON.parse(row.state_json) : {}) };
+    if (method === "PATCH") {
+      const data = await body(req);
+      const valid: Record<string, (v: any) => boolean> = {
+        setupStatus: v => ["not-started", "detecting-tools", "setup-needed", "personalizing", "ready-for-first-handoff", "completed", "interrupted"].includes(v),
+        completedStages: v => Array.isArray(v) && v.length <= 10 && v.every((x: any) => typeof x === "string" && x.length <= 80),
+        selectedSourceAgentId: v => v === null || AGENT_IDS.includes(v), selectedDestinationAgentId: v => v === null || AGENT_IDS.includes(v),
+        floatingCompanionEnabled: v => typeof v === "boolean", themePreference: v => ["system", "light", "dark"].includes(v),
+        preferredShortcut: v => v === null || (typeof v === "string" && v.length <= 80),
+        lastSelectedProjectId: v => v === null || (typeof v === "string" && Boolean(db.prepare("SELECT id FROM projects WHERE id=?").get(v))),
+        dismissedHints: v => Array.isArray(v) && v.length <= 30 && v.every((x: any) => typeof x === "string" && x.length <= 80),
+      };
+      if (!data || typeof data !== "object" || Array.isArray(data) || Object.entries(data).some(([key, value]) => !valid[key] || !valid[key](value))) return fail(res, 400, "INVALID_ONBOARDING", "Invalid onboarding preference", origin);
+      state = { ...state, ...data };
+      if (!state.onboardingStartedAt && Object.keys(data).length) state.onboardingStartedAt = new Date().toISOString();
+      if (data.setupStatus === "completed" && !state.setupCompletedAt) state.setupCompletedAt = new Date().toISOString();
+      if (data.setupStatus === "not-started") state = { ...defaults };
+      db.prepare("INSERT INTO onboarding (id,state_json) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET state_json=excluded.state_json").run(JSON.stringify(state));
+    }
+    const receipt = db.prepare("SELECT handoff_id AS id, retrieved_at AS time FROM handoff_receipts ORDER BY retrieved_at, rowid LIMIT 1").get() as { id: string; time: string } | undefined;
+    return json(res, 200, { ...state, firstVerifiedHandoffId: receipt?.id ?? null, firstVerifiedHandoffAt: receipt?.time ?? null }, origin);
+  }
 
   if (method === "GET" && path.length === 1 && path[0] === "activity") {
     const { count } = db.prepare("SELECT COUNT(*) AS count FROM projects").get() as { count: number };

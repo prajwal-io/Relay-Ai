@@ -116,3 +116,20 @@ export interface ApiContract {
   "GET /projects/:projectId/verification": { response: { checkedAt: string; evidence: Evidence[]; conflicts: string[] } };
 }
 
+
+export interface OnboardingState {
+  onboardingVersion: number;
+  setupStatus: "not-started" | "detecting-tools" | "setup-needed" | "personalizing" | "ready-for-first-handoff" | "completed" | "interrupted";
+  completedStages: string[];
+  selectedSourceAgentId: AgentKind | null;
+  selectedDestinationAgentId: AgentKind | null;
+  floatingCompanionEnabled: boolean;
+  themePreference: "system" | "light" | "dark";
+  preferredShortcut: string | null;
+  lastSelectedProjectId: string | null;
+  onboardingStartedAt: string | null;
+  setupCompletedAt: string | null;
+  firstVerifiedHandoffId: string | null;
+  firstVerifiedHandoffAt: string | null;
+  dismissedHints: string[];
+}

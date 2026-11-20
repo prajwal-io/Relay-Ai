@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('relayDesktop', {
     ipcRenderer.on('relay:auth-callback', listener);
     return () => ipcRenderer.removeListener('relay:auth-callback', listener);
   },
+  dismissHint: hint => ipcRenderer.invoke('relay:dismiss-hint', hint),
   hide: () => ipcRenderer.invoke('relay:hide'),
   onState: callback => {
     const listener = (_event, state) => callback(state);
