@@ -36,6 +36,13 @@ function Wordmark() {
   return <a className="relay-wordmark" href="#top" aria-label="Relay AI home"><span className="relay-logo-crop"><img src="/relay-logo.png" alt="" /></span></a>;
 }
 
+function FirstSwitch({ download }: { download: () => void }) {
+  const [step, setStep] = useState(0);
+  const [from, setFrom] = useState('Codex');
+  const [to, setTo] = useState('OpenCode');
+  return <section className="first-switch" id="first-switch"><div><span className="section-kicker">YOUR FIRST SWITCH · INTERACTIVE DEMO — SAMPLE DATA</span><h2>{step === 0 ? 'Change the agent. Keep the progress.' : step === 1 ? 'Your context, ready to travel.' : 'Continue without starting over.'}</h2><p>{step === 0 ? 'See how Relay carries project context between coding assistants.' : step === 1 ? 'A sample Relay Passport shows the information you can review before a handoff.' : 'Relay helps your next coding assistant understand the reviewed project context so you can pick up where you left off.'}</p></div><div className="demo-passport">{step === 0 ? <><label>From<select value={from} onChange={e => setFrom(e.target.value)}><option>Codex</option><option>OpenCode</option><option>Cursor</option></select></label><label>To<select value={to} onChange={e => setTo(e.target.value)}><option>OpenCode</option><option>Codex</option><option>Cursor</option></select></label><p>Sample route · Actual capabilities vary by assistant.</p><button className="primary-action" disabled={from === to} onClick={() => setStep(1)}>Preview this switch →</button><a href="#how">Skip demo</a></> : step === 1 ? <><strong>{from} → Relay → {to}</strong><details open><summary>Project and decision</summary><p>Developer Portfolio · React + TypeScript</p></details><details><summary>Completed work</summary><p>Login form and validation</p></details><details open><summary>Unfinished work</summary><p>Connect the authentication API</p></details><button className="primary-action" onClick={() => setStep(2)}>See the destination →</button></> : <><strong>{to} · simulated destination</strong><p>Continue authentication by connecting the API. Login form and validation are complete.</p><button className="primary-action" onClick={download}>Windows release status →</button><a href="#features">Explore supported agents</a></>}<button className="text-button" onClick={() => setStep(0)}>Restart demo</button></div></section>;
+}
+
 function RelayMotionGraphic() {
   const [phase, setPhase] = useState<Phase>('idle');
   const packet = useRef<SVGAnimateMotionElement | null>(null);
@@ -151,11 +158,7 @@ export default function LandingPage({ goDashboard }: { goDashboard: () => void }
     return () => { data.subscription.unsubscribe(); stopDesktopCallback?.(); };
   }, []);
 
-  const requestDownload = () => {
-    if (session) { window.location.assign('https://github.com/prajwal-io/Relay-Ai/releases'); return; }
-    sessionStorage.setItem('relay-download-after-auth', '1');
-    setAuthError(''); setAuthMessage(''); setAuthOpen(true);
-  };
+  const requestDownload = () => { window.location.assign('https://github.com/prajwal-io/Relay-Ai/releases'); };
   const sendSignInLink = async (event: React.FormEvent) => {
     event.preventDefault(); if (!supabase || !email.trim()) return;
     setAuthBusy(true); setAuthError(''); setAuthMessage('');
@@ -185,6 +188,7 @@ export default function LandingPage({ goDashboard }: { goDashboard: () => void }
       <div className="feature-privacy" data-reveal><div className="approval-art"><div className="approval-stamp">REVIEW BEFORE TRANSFER</div><div className="approval-direction"><span className="mini-agent">O</span><strong>OpenCode</strong><span className="direction-route"/><span className="mini-agent mini-codex">⌘</span><strong>Codex</strong></div><p>3 memory items selected<br/>1 repository observation · 1 unverified claim</p><div className="approval-switch"><span>Include selected context</span><i><b/></i><Check size={13}/></div></div><h2>Share only<br/>what you <span>approve.</span></h2><p>Review the handoff first. The next assistant can load it only after you approve.</p></div>
     </section>
 
+    <FirstSwitch download={requestDownload}/>
     <section className="steps-section" id="how"><div className="steps-title" data-reveal><h2>Pick up the work<br/><span>in three steps.</span></h2></div><div className="steps-track"><article data-reveal><span className="step-count">01</span><div className="step-line"><i/></div><h3>Work naturally</h3><p>Work in Codex or OpenCode as usual. Add the useful notes to Relay.</p></article><article data-reveal><span className="step-count">02</span><div className="step-line"><i/></div><h3>Check the evidence</h3><p>Relay checks the repository and flags anything it cannot confirm.</p></article><article data-reveal><span className="step-count">03</span><div className="step-line"><i/></div><h3>Approve the handoff</h3><p>Choose a destination and approve the context. OpenCode can launch from Relay. Other assistants can use a manual MCP setup where supported.</p></article></div></section>
 
     <section className="privacy-band-new" data-reveal><div className="privacy-symbol"><LockKeyhole size={22}/></div><div><span>LOCAL FIRST, BY DEFAULT</span><h2>Your project stays on your computer.</h2></div><p>SQLite stores project memory locally. Optional Supabase account backup saves selected memory and public repo links; it does not upload local paths or source files.</p></section>
