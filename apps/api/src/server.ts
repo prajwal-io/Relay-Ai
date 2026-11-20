@@ -9,6 +9,8 @@ import { dataDirectory, db } from "./db.js";
 import { collectRepositoryEvidence, resolveProjectFile, validateRootPath } from "./repository.js";
 import { cloneAndInspectRepository, parsePublicRepository } from "./repository-import.js";
 import type { AgentKind, Evidence, Handoff, HandoffReceipt, HandoffReceiptEntry, MemoryItem, MemoryKind, Project } from "../../../packages/shared/src/contracts.js";
+import { AGENT_IDS, AGENT_REGISTRY } from "../../../packages/shared/src/agents.js";
+import { detectAgent } from "./agent-installations.js";
 import { configuredExtractionProvider, extractContext } from "./intelligence.js";
 
 const API = "/api/v1";
@@ -49,7 +51,7 @@ const allowedOrigins = new Set(
       } catch { return []; }
     }),
 );
-const agentKinds = new Set<AgentKind>(["opencode", "codex", "other"]);
+const agentKinds = new Set<AgentKind>([...AGENT_IDS, "other"]);
 const memoryKinds = new Set<MemoryKind>(["task", "decision", "file", "issue", "note"]);
 let activeRepositoryImports = 0;
 const activeRepositoryUrls = new Set<string>();
@@ -89,7 +91,7 @@ function memoryFrom(row: any): MemoryItem {
   return { id: row.id, projectId: row.project_id, ...(row.session_id ? { sessionId: row.session_id } : {}), kind: row.kind, content: row.content, ...(row.status ? { status: row.status } : {}), source: row.source, ...(row.confidence == null ? {} : { confidence: row.confidence }), tags: JSON.parse(row.tags_json), evidence: JSON.parse(row.evidence_json), createdAt: row.created_at, updatedAt: row.updated_at };
 }
 function handoffFrom(row: any): Handoff {
-  return { id: row.id, projectId: row.project_id, source: row.source, destination: row.destination, title: row.title, summary: row.summary, memoryItemIds: JSON.parse(row.memory_ids_json), evidence: JSON.parse(row.evidence_json), verification: row.verification, status: row.status, createdAt: row.created_at, ...(row.approved_at ? { approvedAt: row.approved_at } : {}), ...(row.loaded_at ? { loadedAt: row.loaded_at } : {}) };
+  return { id: row.id, projectId: row.project_id, ...(row.source_session_id ? { sourceSessionId: row.source_session_id } : {}), source: row.source, destination: row.destination, title: row.title, summary: row.summary, memoryItemIds: JSON.parse(row.memory_ids_json), evidence: JSON.parse(row.evidence_json), verification: row.verification, status: row.status, createdAt: row.created_at, ...(row.approved_at ? { approvedAt: row.approved_at } : {}), ...(row.loaded_at ? { loadedAt: row.loaded_at } : {}) };
 }
 function loadProject(id: string): Project {
   const row = db.prepare("SELECT * FROM projects WHERE id=?").get(id) as any;
@@ -116,8 +118,8 @@ function rankItems(items: MemoryItem[], query = ""): MemoryItem[] {
   }).sort((a, b) => b.score - a.score || b.item.updatedAt.localeCompare(a.item.updatedAt)).map(({ item }) => item).slice(0, 40);
 }
 function saveHandoff(h: Handoff) {
-  db.prepare(`INSERT INTO handoffs (id,project_id,source,destination,title,summary,memory_ids_json,evidence_json,verification,status,created_at,approved_at,loaded_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(h.id,h.projectId,h.source,h.destination,h.title,h.summary,JSON.stringify(h.memoryItemIds),JSON.stringify(h.evidence),h.verification,h.status,h.createdAt,h.approvedAt ?? null,h.loadedAt ?? null);
+  db.prepare(`INSERT INTO handoffs (id,project_id,source,destination,title,summary,memory_ids_json,evidence_json,verification,status,created_at,approved_at,loaded_at,source_session_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(h.id,h.projectId,h.source,h.destination,h.title,h.summary,JSON.stringify(h.memoryItemIds),JSON.stringify(h.evidence),h.verification,h.status,h.createdAt,h.approvedAt ?? null,h.loadedAt ?? null,h.sourceSessionId ?? null);
 }
 function updateHandoff(h: Handoff) {
   db.prepare("UPDATE handoffs SET memory_ids_json=?,evidence_json=?,verification=?,status=?,approved_at=?,loaded_at=? WHERE id=?")
@@ -139,14 +141,14 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   // have no Fetch Metadata headers and remain supported over loopback.
   if (req.headers["sec-fetch-site"] === "cross-site") return fail(res, 403, "CROSS_SITE_REQUEST", "Cross-site browser requests cannot access the local Relay service", origin);
   if (req.method === "OPTIONS") {
-    res.writeHead(204, { "access-control-allow-origin": origin && allowedOrigins.has(origin) ? origin : "null", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type, authorization", "access-control-max-age": "600", vary: "Origin" });
+    res.writeHead(204, { "access-control-allow-origin": origin && allowedOrigins.has(origin) ? origin : "null", "access-control-allow-methods": "GET,POST,PATCH,OPTIONS", "access-control-allow-headers": "content-type, authorization", "access-control-max-age": "600", vary: "Origin" });
     return res.end();
   }
-  if (req.method === "POST" && !/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] ?? "")) {
+  if (["POST", "PATCH"].includes(req.method ?? "") && !/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] ?? "")) {
     return fail(res, 415, "JSON_REQUIRED", "POST requests must use application/json", origin);
   }
-  if (!req.method || !["GET", "POST"].includes(req.method)) {
-    res.setHeader("allow", "GET, POST, OPTIONS");
+  if (!req.method || !["GET", "POST", "PATCH"].includes(req.method)) {
+    res.setHeader("allow", "GET, POST, PATCH, OPTIONS");
     return fail(res, 405, "METHOD_NOT_ALLOWED", "This method is not supported by the Relay API", origin);
   }
   const now = Date.now();
@@ -179,12 +181,43 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   const path = url.pathname.slice(API.length).split("/").filter(Boolean).map(decodeURIComponent);
   const method = req.method ?? "GET";
 
+  if (path.length === 1 && path[0] === "onboarding" && ["GET", "PATCH"].includes(method)) {
+    const defaults = { onboardingVersion: 1, setupStatus: "not-started", completedStages: [], selectedSourceAgentId: null, selectedDestinationAgentId: null, floatingCompanionEnabled: true, themePreference: "system", preferredShortcut: null, lastSelectedProjectId: null, onboardingStartedAt: null, setupCompletedAt: null, dismissedHints: [] };
+    const row = db.prepare("SELECT state_json FROM onboarding WHERE id=1").get() as { state_json: string } | undefined;
+    let state: Record<string, any> = { ...defaults, ...(row ? JSON.parse(row.state_json) : {}) };
+    if (method === "PATCH") {
+      const data = await body(req);
+      const valid: Record<string, (v: any) => boolean> = {
+        setupStatus: v => ["not-started", "detecting-tools", "setup-needed", "personalizing", "ready-for-first-handoff", "completed", "interrupted"].includes(v),
+        completedStages: v => Array.isArray(v) && v.length <= 10 && v.every((x: any) => typeof x === "string" && x.length <= 80),
+        selectedSourceAgentId: v => v === null || AGENT_IDS.includes(v), selectedDestinationAgentId: v => v === null || AGENT_IDS.includes(v),
+        floatingCompanionEnabled: v => typeof v === "boolean", themePreference: v => ["system", "light", "dark"].includes(v),
+        preferredShortcut: v => v === null || (typeof v === "string" && v.length <= 80),
+        lastSelectedProjectId: v => v === null || (typeof v === "string" && Boolean(db.prepare("SELECT id FROM projects WHERE id=?").get(v))),
+        dismissedHints: v => Array.isArray(v) && v.length <= 30 && v.every((x: any) => typeof x === "string" && x.length <= 80),
+      };
+      if (!data || typeof data !== "object" || Array.isArray(data) || Object.entries(data).some(([key, value]) => !valid[key] || !valid[key](value))) return fail(res, 400, "INVALID_ONBOARDING", "Invalid onboarding preference", origin);
+      state = { ...state, ...data };
+      if (!state.onboardingStartedAt && Object.keys(data).length) state.onboardingStartedAt = new Date().toISOString();
+      if (data.setupStatus === "completed" && !state.setupCompletedAt) state.setupCompletedAt = new Date().toISOString();
+      if (data.setupStatus === "not-started") state = { ...defaults };
+      db.prepare("INSERT INTO onboarding (id,state_json) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET state_json=excluded.state_json").run(JSON.stringify(state));
+    }
+    const receipt = db.prepare("SELECT handoff_id AS id, retrieved_at AS time FROM handoff_receipts ORDER BY retrieved_at, rowid LIMIT 1").get() as { id: string; time: string } | undefined;
+    return json(res, 200, { ...state, firstVerifiedHandoffId: receipt?.id ?? null, firstVerifiedHandoffAt: receipt?.time ?? null }, origin);
+  }
+
   if (method === "GET" && path.length === 1 && path[0] === "activity") {
     const { count } = db.prepare("SELECT COUNT(*) AS count FROM projects").get() as { count: number };
     const handoffs = db.prepare(`SELECT id, project_id AS projectId, title, source, destination, status, verification,
       created_at AS createdAt, json_array_length(memory_ids_json) AS itemCount
       FROM handoffs ORDER BY MAX(created_at, COALESCE(approved_at, ''), COALESCE(loaded_at, '')) DESC, rowid DESC LIMIT 20`).all();
     return json(res, 200, { projectCount: count, handoffs }, origin);
+  }
+
+  if (method === "GET" && path.length === 1 && path[0] === "agents") {
+    const agents = await Promise.all(AGENT_REGISTRY.map(async agent => ({ ...agent, installation: await detectAgent(agent.id) })));
+    return json(res, 200, { agents }, origin);
   }
 
   if (method === "GET" && path.length === 1 && path[0] === "projects") {
@@ -293,7 +326,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     const itemEvidence = repo.evidence.filter((e) => e.kind !== "git-status");
     const verification = repo.conflicts.length ? "conflict" : itemEvidence.some((e) => e.status === "verified") ? "partial" : "unverified";
     const summary = items.length ? items.slice(0, 6).map((x) => `• ${x.content}`).join("\n") : "No saved project context matched this handoff yet.";
-    const handoff: Handoff = { id: randomUUID(), projectId: project.id, source: data.source, destination: data.destination, title: typeof data.title === "string" && data.title.trim() ? data.title.trim().slice(0, 120) : `Continue in ${data.destination}`, summary, memoryItemIds: items.map((x) => x.id), evidence, verification, status: "draft", createdAt: now };
+    const handoff: Handoff = { id: randomUUID(), projectId: project.id, ...(typeof data.sourceSessionId === 'string' && data.sourceSessionId.length <= 200 ? { sourceSessionId: data.sourceSessionId } : {}), source: data.source, destination: data.destination, title: typeof data.title === "string" && data.title.trim() ? data.title.trim().slice(0, 120) : `Continue in ${data.destination}`, summary, memoryItemIds: items.map((x) => x.id), evidence, verification, status: "draft", createdAt: now };
     saveHandoff(handoff); return json(res, 201, handoff, origin);
   }
   if (path[0] === "projects" && path[1] && path[2] === "verification" && method === "GET") {
@@ -379,7 +412,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       const evidence = latest?.evidence ?? handoff.evidence;
       const repositoryStatus = await getReceiptRepositoryStatus(handoff);
       const receipt: HandoffReceipt = {
-        handoffId: handoff.id,
+        handoffId: handoff.id, source: handoff.source, projectId: handoff.projectId, sourceSessionId: handoff.sourceSessionId, approvedAt: handoff.approvedAt,
         destination: latest?.destination ?? handoff.destination,
         approvedItemIds: latest?.approvedItemIds ?? handoff.memoryItemIds,
         approvedItems: latest?.approvedItems ?? [],

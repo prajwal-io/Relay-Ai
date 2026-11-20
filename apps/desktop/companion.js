@@ -11,6 +11,7 @@ let workflowGeneration = 0;
 let draft = null;
 let activeHandoffId = '';
 let handoffProgress = null;
+let activeHint = '';
 let launchMode = 'terminal';
 
 async function expand(value) {
@@ -41,7 +42,7 @@ async function expand(value) {
   }
 }
 
-toggle.addEventListener('click', () => expand(!expanded));
+toggle.addEventListener('click', () => { if (activeHint === 'expand') void window.relayDesktop.dismissHint('expand'); void expand(!expanded); });
 document.querySelector('#close').addEventListener('click', () => expand(false));
   document.querySelector('#dashboard').addEventListener('click', () => {
     void window.relayDesktop.openDashboard().catch(error => {
@@ -188,7 +189,13 @@ async function readChat(id) {
     draft = null; showStage('review-stage'); context.focus();
   } catch (error) { if (workflowOpen && generation === workflowGeneration) { status.textContent = errorMessage(error); for (const button of chatList.querySelectorAll('button')) button.disabled = false; } }
 }
+document.querySelector('#all-agents').addEventListener('click', () => {
+  void window.relayDesktop.openDashboard(true).catch(error => {
+    document.querySelector('#local-status').textContent = errorMessage(error);
+  });
+});
 document.querySelector('#start-switch').addEventListener('click', async () => {
+  if (activeHint === 'quick-handoff') void window.relayDesktop.dismissHint('quick-handoff');
   workflowOpen = true; monitor.hidden = true; workflow.hidden = false;
   document.querySelector('#back-monitor').focus();
   await window.relayDesktop.workflow(true); if (workflowOpen) void loadChats();
@@ -347,7 +354,16 @@ function setHandoff(handoff, isEvent) {
   setStepState(status);
 }
 
+document.querySelector('#dismiss-hint').addEventListener('click', () => {
+  if (activeHint) void window.relayDesktop.dismissHint(activeHint);
+  document.querySelector('#companion-hint').hidden = true;
+});
 window.relayDesktop.onState(state => {
+  const dismissed = state.onboarding?.dismissedHints ?? [];
+  activeHint = !dismissed.includes('expand') ? 'expand' : !dismissed.includes('quick-handoff') ? 'quick-handoff' : '';
+  const hint = document.querySelector('#companion-hint');
+  hint.hidden = !activeHint;
+  document.querySelector('#hint-copy').textContent = activeHint === 'expand' ? 'Relay is one click away.' : 'Switch agents without starting over.';
   if (firstState) {
     firstState = false;
     expand(true);

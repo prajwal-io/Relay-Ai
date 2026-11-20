@@ -1,6 +1,8 @@
 /** Shared contracts for the Relay AI local service, web client, and MCP tools. */
 
-export type AgentKind = "opencode" | "codex" | "other";
+import type { AgentId } from "./agents.js";
+
+export type AgentKind = AgentId | "other";
 export type MemoryKind = "task" | "decision" | "file" | "issue" | "note";
 export type EvidenceStatus = "verified" | "unverified" | "conflict";
 
@@ -48,6 +50,7 @@ export interface MemoryItem {
 }
 
 export interface Handoff {
+  sourceSessionId?: string;
   id: string;
   projectId: string;
   source: AgentKind;
@@ -75,6 +78,10 @@ export interface HandoffReceiptEntry {
 }
 
 export interface HandoffReceipt {
+  source?: AgentKind;
+  projectId?: string;
+  sourceSessionId?: string;
+  approvedAt?: string;
   handoffId: string;
   destination: AgentKind;
   approvedItemIds: string[];
@@ -109,3 +116,20 @@ export interface ApiContract {
   "GET /projects/:projectId/verification": { response: { checkedAt: string; evidence: Evidence[]; conflicts: string[] } };
 }
 
+
+export interface OnboardingState {
+  onboardingVersion: number;
+  setupStatus: "not-started" | "detecting-tools" | "setup-needed" | "personalizing" | "ready-for-first-handoff" | "completed" | "interrupted";
+  completedStages: string[];
+  selectedSourceAgentId: AgentKind | null;
+  selectedDestinationAgentId: AgentKind | null;
+  floatingCompanionEnabled: boolean;
+  themePreference: "system" | "light" | "dark";
+  preferredShortcut: string | null;
+  lastSelectedProjectId: string | null;
+  onboardingStartedAt: string | null;
+  setupCompletedAt: string | null;
+  firstVerifiedHandoffId: string | null;
+  firstVerifiedHandoffAt: string | null;
+  dismissedHints: string[];
+}

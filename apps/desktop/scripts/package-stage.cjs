@@ -20,12 +20,13 @@ copy(path.join(desktopRoot, 'assets'), path.join(stage, 'assets'));
 copy(path.join(root, 'apps', 'api', '.env.example'), path.join(stage, 'api.env.example'));
 
 for (const [entry, outfile] of [
+  [path.join(desktopRoot, 'opencode-desktop.cjs'), path.join(stage, 'opencode-desktop.cjs')],
   [path.join(root, 'apps', 'api', 'src', 'server.ts'), path.join(stage, 'api', 'server.cjs')],
   [path.join(root, 'apps', 'api', 'src', 'database-copy.ts'), path.join(stage, 'api', 'database-copy.cjs')],
   [path.join(root, 'apps', 'mcp', 'src', 'index.ts'), path.join(stage, 'mcp', 'index.cjs')],
 ]) {
   fs.mkdirSync(path.dirname(outfile), { recursive: true });
-  buildSync({ entryPoints: [entry], outfile, bundle: true, platform: 'node', format: 'cjs', target: 'node24', packages: 'bundle', sourcemap: false, logLevel: 'warning' });
+  buildSync({ entryPoints: [entry], outfile, bundle: true, platform: 'node', format: 'cjs', target: 'node24', packages: 'bundle', mainFields: ['module', 'main'], sourcemap: false, logLevel: 'warning' });
 }
 
 const webDist = path.join(root, 'apps', 'web', 'dist');

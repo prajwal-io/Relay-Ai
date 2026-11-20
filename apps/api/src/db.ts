@@ -18,6 +18,7 @@ if (version === 0 && existing && db.prepare("SELECT name FROM sqlite_master WHER
 db.exec("BEGIN IMMEDIATE");
 try {
 db.exec(`
+  CREATE TABLE IF NOT EXISTS onboarding (id INTEGER PRIMARY KEY CHECK (id = 1), state_json TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, root_path TEXT NOT NULL UNIQUE,
     repository TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -51,6 +52,9 @@ db.exec(`
 
 // Local databases created before the context snapshot field can be upgraded
 // in place without discarding existing retrieval receipts.
+if (!db.prepare("PRAGMA table_info(handoffs)").all().some(column => column.name === "source_session_id")) {
+  db.exec("ALTER TABLE handoffs ADD COLUMN source_session_id TEXT");
+}
 const receiptColumns = db.prepare("PRAGMA table_info(handoff_receipts)").all() as { name: string }[];
 if (!receiptColumns.some((column) => column.name === "approved_context_json")) {
   db.exec("ALTER TABLE handoff_receipts ADD COLUMN approved_context_json TEXT NOT NULL DEFAULT '[]'");

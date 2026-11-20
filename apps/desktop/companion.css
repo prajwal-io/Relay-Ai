@@ -222,3 +222,4 @@ body { margin: 0; background: transparent; overflow: hidden; }
 .launch-choice small { color: #68717d; font-size: 10px; line-height: 1.4; }
 .launch-choice :focus-visible { outline: 2px solid #315cf5; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .launch-choice label { transition: none; } }
+.companion-hint{position:absolute;top:55px;left:20px;z-index:4;display:flex;gap:10px;align-items:center;padding:8px 10px;background:#171b24;color:#fff;border-radius:8px;font-size:11px}.companion-hint[hidden]{display:none}.companion-hint button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:15px}.companion-hint button:focus-visible{outline:2px solid #8aa4ff}

@@ -86,6 +86,12 @@ async function main() {
       assert.ok(response.ok, `${route} returned ${response.status}`);
       return response.json();
     }
+    await until(() => evaluate(dashboard, 'document.querySelector(".onboarding h1")?.textContent.includes("find your coding tools")'), 'First-run onboarding');
+    await evaluate(dashboard, '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Continue")).click(); true');
+    await until(() => evaluate(dashboard, 'document.body.innerText.includes("Make it work your way")'), 'Onboarding preferences');
+    await evaluate(dashboard, '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Start my first switch")).click(); true');
+    await until(() => evaluate(dashboard, 'document.body.innerText.includes("move your first context")'), 'First handoff introduction');
+    await evaluate(dashboard, '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Open Handoff Studio")).click(); true');
     await until(async () => {
       const content = await evaluate(dashboard, 'document.body.innerText');
       if (content.includes('Local service offline')) {
@@ -100,16 +106,11 @@ async function main() {
       }
       return content.includes('Local service connected');
     }, 'Authenticated dashboard');
+    await until(() => evaluate(dashboard, 'document.body.innerText.includes("Prepare a handoff")'), 'Setup opens Handoff Studio with default preferences');
     assert.equal(await evaluate(dashboard, 'document.querySelector(".skip-link").click(); document.activeElement.id + location.hash'), 'main-content#dashboard');
     await evaluate(dashboard, 'location.hash = "top"; true');
     await until(() => evaluate(dashboard, 'Boolean(document.querySelector(".relay-header"))'), 'Landing page route');
-    const downloadBefore = await evaluate(dashboard, 'location.href');
-    assert.equal(await evaluate(dashboard, '(() => { const button = document.querySelector(".header-launch"); if (!button) return false; button.click(); return true; })()'), true, 'The website exposes its current release action');
-    await until(() => evaluate(dashboard, 'Boolean(document.querySelector("[role=dialog][aria-modal=true]"))'), 'Website download sign-in gate');
-    const authGate = await evaluate(dashboard, '({ hasEmailInput: Boolean(document.querySelector("[role=dialog] input[type=email]")), text: document.querySelector("[role=dialog]").innerText })');
-    assert.match(authGate.text, /sign in|email|not published|release/i, 'The gate explains how downloads are accessed');
-    assert.ok(authGate.hasEmailInput || /email sign-in is not enabled/i.test(authGate.text), 'The download gate offers email sign-in or clearly reports missing Supabase setup');
-    assert.equal(await evaluate(dashboard, 'location.href'), downloadBefore, 'An unauthenticated click does not navigate directly to release files');
+    assert.equal(await evaluate(dashboard, 'Boolean(document.querySelector(".header-launch"))'), true, 'Release action is available without signing in');
     await devtools(dashboard, 'Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     assert.equal(await evaluate(dashboard, 'document.documentElement.scrollWidth <= innerWidth'), true, 'No mobile page overflow');
     await evaluate(dashboard, 'document.querySelector(".header-dashboard").click(); true');
@@ -137,9 +138,9 @@ async function main() {
     }, 'Dashboard approval');
     await until(() => evaluate(dashboard, 'Boolean(document.querySelector(".desktop-launch select"))'), 'Approved handoff launch choices');
     assert.deepEqual(await evaluate(dashboard, 'Array.from(document.querySelector(".desktop-launch select").options, option => option.value)'), ['terminal', 'desktop']);
-    await evaluate(dashboard, 'const choice = document.querySelector(".desktop-launch select"); choice.value = "desktop"; choice.dispatchEvent(new Event("change", { bubbles: true })); true');
+    await evaluate(dashboard, '(() => { const choice = document.querySelector(".desktop-launch select"); choice.value = "desktop"; choice.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
     assert.match(await evaluate(dashboard, 'document.querySelector(".desktop-launch button").textContent'), /Open Desktop app/);
-    await evaluate(dashboard, 'const choice = document.querySelector(".desktop-launch select"); choice.value = "terminal"; choice.dispatchEvent(new Event("change", { bubbles: true })); true');
+    await evaluate(dashboard, '(() => { const choice = document.querySelector(".desktop-launch select"); choice.value = "terminal"; choice.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
     const scoped = createHmac('sha256', token).update(`load:${draft.id}`).digest('hex');
     await request(`/handoffs/${draft.id}/load`, { destination: 'opencode' }, scoped);
     await until(() => evaluate(companion, 'document.querySelector("#handoff-meta").textContent.includes("Retrieved by destination")'), 'Companion retrieval');

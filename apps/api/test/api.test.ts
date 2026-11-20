@@ -77,6 +77,20 @@ test("installation credentials and scoped handoff access are enforced", async ()
   assert.equal((await scoped(`${draft.id}/load`)).status, 200);
 });
 
+test("agent registry is discoverable and API handoffs accept canonical agent IDs", async () => {
+  const registry = await (await fetch(`${base}/agents`)).json() as any;
+  assert.deepEqual(registry.agents.map((agent: any) => agent.id), ["codex", "opencode", "kiro", "kiro-cli", "cursor", "antigravity", "freebuff"]);
+  const root = join(temp, "generic-agents");
+  await mkdir(root);
+  const project = await (await post(`${base}/projects`, { name: "Generic agents", rootPath: root })).json() as any;
+  const draft = await post(`${base}/projects/${project.id}/handoffs`, { source: "cursor", destination: "kiro-cli" });
+  assert.equal(draft.status, 201);
+  const handoff = await draft.json() as any;
+  assert.equal(handoff.source, "cursor");
+  assert.equal(handoff.destination, "kiro-cli");
+  assert.equal((await post(`${base}/projects/${project.id}/handoffs`, { source: "freebuff", destination: "freebuff" })).status, 400);
+});
+
 test("activity is global, bounded, and promotes recently retrieved packages", async () => {
   const fixtures = [];
   for (let index = 0; index < 24; index++) {
@@ -136,7 +150,7 @@ test("local API rejects hostile Host and cross-site browser requests", async () 
   assert.equal((await crossSite.json() as any).error.code, "CROSS_SITE_REQUEST");
   const unsupportedMethod = await fetch(`${base}/projects`, { method: "DELETE" });
   assert.equal(unsupportedMethod.status, 405);
-  assert.equal(unsupportedMethod.headers.get("allow"), "GET, POST, OPTIONS");
+  assert.equal(unsupportedMethod.headers.get("allow"), "GET, POST, PATCH, OPTIONS");
   const wrongContentType = await fetch(`${base}/projects`, { method: "POST", headers: { "content-type": "text/plain" }, body: "{}" });
   assert.equal(wrongContentType.status, 415);
   assert.equal((await wrongContentType.json() as any).error.code, "JSON_REQUIRED");
@@ -357,4 +371,35 @@ test("explicit handoff items stay project-scoped and tracked changes invalidate 
   const staleReceipt = await (await fetch(`${base}/handoffs/${freshDraft.id}/receipt`)).json() as any;
   assert.equal(staleReceipt.repositoryStatus, "stale", "receipts surface repository drift after retrieval");
   assert.equal(staleReceipt.approvedItems[0].content, item.content, "the receipt preserves the retrieved text even if the repository later changes");
+});
+test("approved source sessions reach only their chosen destination and retain their receipt", async () => {
+  const root = join(temp, "route-matrix");
+  await mkdir(root);
+  const project = await (await post(base + "/projects", { name: "Route matrix", rootPath: root })).json() as any;
+  const item = await (await post(base + "/projects/" + project.id + "/memory", { kind: "task", content: "Finish fixture", source: "user" })).json() as any;
+  for (const [source, destination] of [["codex", "opencode"], ["opencode", "codex"], ["cursor", "kiro-cli"]]) {
+    const draft = await (await post(base + "/projects/" + project.id + "/handoffs", { source, destination, sourceSessionId: "fixture-session", memoryItemIds: [item.id] })).json() as any;
+    const route = base + "/handoffs/" + draft.id;
+    const credential = createHmac("sha256", installationToken).update("load:" + draft.id).digest("hex");
+    const load = (agent: string) => fetch(route + "/load", { method: "POST", headers: { authorization: "Bearer " + credential, "content-type": "application/json" }, body: JSON.stringify({ destination: agent }) });
+    assert.equal((await load(destination)).ok, false);
+    assert.equal((await post(route + "/approve", { includeItemIds: [item.id] })).ok, true);
+    assert.equal((await load(source)).ok, false);
+    assert.equal((await load(destination)).ok, true);
+    assert.equal((await load(destination)).ok, true);
+    const receipt = await (await fetch(route + "/receipt")).json() as any;
+    assert.deepEqual([receipt.source, receipt.destination, receipt.projectId, receipt.sourceSessionId, receipt.retrievalCount], [source, destination, project.id, "fixture-session", 2]);
+  }
+});
+
+test("onboarding preferences persist and activation requires a retrieval receipt", async () => {
+  const initial = await (await fetch(`${base}/onboarding`)).json() as any;
+  assert.equal(initial.setupStatus, "not-started");
+  const patch = (data: unknown) => fetch(`${base}/onboarding`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+  assert.equal((await patch({ firstVerifiedHandoffId: "fabricated" })).status, 400);
+  assert.equal((await patch({ themePreference: "dark", setupStatus: "personalizing" })).status, 200);
+  const saved = await (await fetch(`${base}/onboarding`)).json() as any;
+  assert.equal(saved.themePreference, "dark");
+  assert.equal(saved.setupStatus, "personalizing");
+  assert.equal(saved.firstVerifiedHandoffId, initial.firstVerifiedHandoffId);
 });
