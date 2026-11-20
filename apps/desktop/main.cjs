@@ -38,6 +38,7 @@ let preparedDraft = null;
 const bridges = new Map();
 const openingHandoffs = new Map();
 let lastHandoffs = new Map();
+let companionPreference;
 let currentState = { online: false, projectCount: 0, recent: null, notice: 'Starting local Relay service…' };
 const positionPath = path.join(app.getPath('userData'), 'desktop-position.json');
 const installedDbPath = path.join(app.getPath('userData'), 'data', 'relay.sqlite');
@@ -494,7 +495,12 @@ async function ensureApi() {
 
 async function pollActivity() {
   try {
-    const { projectCount, handoffs } = await requestJson(`${apiBase}/activity`);
+    const [{ projectCount, handoffs }, onboarding] = await Promise.all([requestJson(`${apiBase}/activity`), apiRequest("/onboarding")]);
+    currentState.onboarding = onboarding;
+    if (companionPreference !== onboarding.floatingCompanionEnabled) {
+      companionPreference = onboarding.floatingCompanionEnabled;
+      if (companionPreference) widget?.show(); else widget?.hide();
+    }
 
     let completed;
     for (const handoff of handoffs) {
@@ -601,6 +607,12 @@ handle('relay:move-by', (_event, dx, dy) => {
   persistPosition();
 });
 handle('relay:open-dashboard', (_event, studio) => openDashboard(studio === true));
+handle('relay:dismiss-hint', async (_event, hint) => {
+  if (typeof hint !== 'string' || !['expand', 'quick-handoff'].includes(hint)) throw new Error('Unknown onboarding hint.');
+  const state = await apiRequest('/onboarding');
+  currentState.onboarding = await apiRequest('/onboarding', { method: 'PATCH', body: JSON.stringify({ dismissedHints: [...new Set([...state.dismissedHints, hint])] }) });
+  sendState();
+});
 handle('relay:hide', () => widget?.hide());
 
 const initialAuthUrl = process.argv.find(arg => arg.startsWith('relay-ai://'));
@@ -627,11 +639,8 @@ app.whenReady().then(async () => {
     pollTimer = setInterval(() => void pollActivity(), 2500);
   } else sendState();
   if (online && app.isPackaged) {
-    const setupMarker = path.join(app.getPath('userData'), 'setup-shown');
-    if (!fs.existsSync(setupMarker)) {
-      await checkSetup();
-      fs.writeFileSync(setupMarker, '', { mode: 0o600 });
-    }
+    const onboarding = await apiRequest('/onboarding');
+    if (onboarding.setupStatus !== 'completed') await openDashboard();
   }
   if (initialAuthUrl) receiveAuthCallback(initialAuthUrl);
   else if (pendingAuthCallback && online) void openDashboard().catch(() => {});

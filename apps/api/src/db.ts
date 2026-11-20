@@ -18,6 +18,7 @@ if (version === 0 && existing && db.prepare("SELECT name FROM sqlite_master WHER
 db.exec("BEGIN IMMEDIATE");
 try {
 db.exec(`
+  CREATE TABLE IF NOT EXISTS onboarding (id INTEGER PRIMARY KEY CHECK (id = 1), state_json TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, root_path TEXT NOT NULL UNIQUE,
     repository TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL

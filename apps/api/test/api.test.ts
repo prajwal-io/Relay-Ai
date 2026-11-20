@@ -150,7 +150,7 @@ test("local API rejects hostile Host and cross-site browser requests", async () 
   assert.equal((await crossSite.json() as any).error.code, "CROSS_SITE_REQUEST");
   const unsupportedMethod = await fetch(`${base}/projects`, { method: "DELETE" });
   assert.equal(unsupportedMethod.status, 405);
-  assert.equal(unsupportedMethod.headers.get("allow"), "GET, POST, OPTIONS");
+  assert.equal(unsupportedMethod.headers.get("allow"), "GET, POST, PATCH, OPTIONS");
   const wrongContentType = await fetch(`${base}/projects`, { method: "POST", headers: { "content-type": "text/plain" }, body: "{}" });
   assert.equal(wrongContentType.status, 415);
   assert.equal((await wrongContentType.json() as any).error.code, "JSON_REQUIRED");
@@ -390,4 +390,16 @@ test("approved source sessions reach only their chosen destination and retain th
     const receipt = await (await fetch(route + "/receipt")).json() as any;
     assert.deepEqual([receipt.source, receipt.destination, receipt.projectId, receipt.sourceSessionId, receipt.retrievalCount], [source, destination, project.id, "fixture-session", 2]);
   }
+});
+
+test("onboarding preferences persist and activation requires a retrieval receipt", async () => {
+  const initial = await (await fetch(`${base}/onboarding`)).json() as any;
+  assert.equal(initial.setupStatus, "not-started");
+  const patch = (data: unknown) => fetch(`${base}/onboarding`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+  assert.equal((await patch({ firstVerifiedHandoffId: "fabricated" })).status, 400);
+  assert.equal((await patch({ themePreference: "dark", setupStatus: "personalizing" })).status, 200);
+  const saved = await (await fetch(`${base}/onboarding`)).json() as any;
+  assert.equal(saved.themePreference, "dark");
+  assert.equal(saved.setupStatus, "personalizing");
+  assert.equal(saved.firstVerifiedHandoffId, initial.firstVerifiedHandoffId);
 });
