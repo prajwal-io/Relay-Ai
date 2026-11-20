@@ -137,9 +137,9 @@ async function main() {
     }, 'Dashboard approval');
     await until(() => evaluate(dashboard, 'Boolean(document.querySelector(".desktop-launch select"))'), 'Approved handoff launch choices');
     assert.deepEqual(await evaluate(dashboard, 'Array.from(document.querySelector(".desktop-launch select").options, option => option.value)'), ['terminal', 'desktop']);
-    await evaluate(dashboard, 'const choice = document.querySelector(".desktop-launch select"); choice.value = "desktop"; choice.dispatchEvent(new Event("change", { bubbles: true })); true');
+    await evaluate(dashboard, '(() => { const choice = document.querySelector(".desktop-launch select"); choice.value = "desktop"; choice.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
     assert.match(await evaluate(dashboard, 'document.querySelector(".desktop-launch button").textContent'), /Open Desktop app/);
-    await evaluate(dashboard, 'const choice = document.querySelector(".desktop-launch select"); choice.value = "terminal"; choice.dispatchEvent(new Event("change", { bubbles: true })); true');
+    await evaluate(dashboard, '(() => { const choice = document.querySelector(".desktop-launch select"); choice.value = "terminal"; choice.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
     const scoped = createHmac('sha256', token).update(`load:${draft.id}`).digest('hex');
     await request(`/handoffs/${draft.id}/load`, { destination: 'opencode' }, scoped);
     await until(() => evaluate(companion, 'document.querySelector("#handoff-meta").textContent.includes("Retrieved by destination")'), 'Companion retrieval');
