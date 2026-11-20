@@ -15,7 +15,6 @@ let activeHint = '';
 let launchMode = 'terminal';
 
 async function expand(value) {
-  if (value && activeHint === 'expand') void window.relayDesktop.dismissHint('expand');
   const sequence = ++expansionSequence;
   clearTimeout(collapseTimer);
   expanded = value;
@@ -43,7 +42,7 @@ async function expand(value) {
   }
 }
 
-toggle.addEventListener('click', () => expand(!expanded));
+toggle.addEventListener('click', () => { if (activeHint === 'expand') void window.relayDesktop.dismissHint('expand'); void expand(!expanded); });
 document.querySelector('#close').addEventListener('click', () => expand(false));
   document.querySelector('#dashboard').addEventListener('click', () => {
     void window.relayDesktop.openDashboard().catch(error => {
